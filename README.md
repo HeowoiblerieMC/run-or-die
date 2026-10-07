@@ -2,7 +2,7 @@
 
 # 🔴 RUN FOR LIVE
 
-### RESTORE. RUN. ESCAPE.
+### HURRY UP. RUN. ESCAPE.
 
 A first-person 3D escape game built with Three.js.
 
