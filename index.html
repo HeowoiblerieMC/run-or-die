@@ -2,20 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     >
-
-    <meta
-        name="theme-color"
-        content="#05090e"
-    >
-
+    <meta name="theme-color" content="#03070b">
     <title>Run For Live</title>
 </head>
-
 <body>
     <div id="app">
         <div id="startup-status">
@@ -24,83 +17,42 @@
         </div>
     </div>
 
-    <script type="module" src="./src/main.js"> </script>
+    <script type="module">
+        const startupStatus = document.querySelector("#startup-status");
 
-    <script>
-    window.addEventListener("error", function (event) {
-        const startupStatus =
-            document.querySelector("#startup-status");
-
-        if (!startupStatus) {
-            return;
-        }
-
-        startupStatus.innerHTML = "";
-
-        const title =
-            document.createElement("h1");
-
-        title.textContent =
-            "STARTUP ERROR";
-
-        const message =
-            document.createElement("pre");
-
-        message.style.whiteSpace =
-            "pre-wrap";
-
-        message.style.color =
-            "#b00020";
-
-        message.textContent =
-            event.message ||
-            "Unknown JavaScript error";
-
-        startupStatus.append(
-            title,
-            message
-        );
-    });
-
-    window.addEventListener(
-        "unhandledrejection",
-        function (event) {
-            const startupStatus =
-                document.querySelector(
-                    "#startup-status"
-                );
-
+        function showStartupError(error) {
             if (!startupStatus) {
                 return;
             }
 
             startupStatus.innerHTML = "";
 
-            const title =
-                document.createElement("h1");
+            const title = document.createElement("h1");
+            title.textContent = "STARTUP ERROR";
 
-            title.textContent =
-                "STARTUP ERROR";
+            const message = document.createElement("pre");
+            message.style.maxWidth = "min(900px, 90vw)";
+            message.style.padding = "16px";
+            message.style.whiteSpace = "pre-wrap";
+            message.style.wordBreak = "break-word";
+            message.style.color = "#ff6b6b";
+            message.style.background = "#120708";
+            message.style.border = "1px solid #7f1d1d";
+            message.style.borderRadius = "8px";
+            message.textContent = error?.stack || error?.message || String(error);
 
-            const message =
-                document.createElement("pre");
-
-            message.style.whiteSpace =
-                "pre-wrap";
-
-            message.style.color =
-                "#b00020";
-
-            message.textContent =
-                event.reason?.message ||
-                String(event.reason);
-
-            startupStatus.append(
-                title,
-                message
-            );
+            startupStatus.append(title, message);
         }
-    );
-</script>
+
+        window.addEventListener("error", event => {
+            showStartupError(event.error || event.message);
+        });
+
+        window.addEventListener("unhandledrejection", event => {
+            showStartupError(event.reason);
+        });
+
+        import("./src/main.js").catch(showStartupError);
+    </script>
 </body>
 </html>
