@@ -3,7 +3,7 @@ import {
 } from "vite";
 
 export default defineConfig({
-    base: "/run-for-live/",
+    base: "/run-or-die/",
 
     build: {
         outDir: "dist",
