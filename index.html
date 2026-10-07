@@ -25,5 +25,82 @@
     </div>
 
     <script type="module" src="./src/main.js"> </script>
+
+    <script>
+    window.addEventListener("error", function (event) {
+        const startupStatus =
+            document.querySelector("#startup-status");
+
+        if (!startupStatus) {
+            return;
+        }
+
+        startupStatus.innerHTML = "";
+
+        const title =
+            document.createElement("h1");
+
+        title.textContent =
+            "STARTUP ERROR";
+
+        const message =
+            document.createElement("pre");
+
+        message.style.whiteSpace =
+            "pre-wrap";
+
+        message.style.color =
+            "#b00020";
+
+        message.textContent =
+            event.message ||
+            "Unknown JavaScript error";
+
+        startupStatus.append(
+            title,
+            message
+        );
+    });
+
+    window.addEventListener(
+        "unhandledrejection",
+        function (event) {
+            const startupStatus =
+                document.querySelector(
+                    "#startup-status"
+                );
+
+            if (!startupStatus) {
+                return;
+            }
+
+            startupStatus.innerHTML = "";
+
+            const title =
+                document.createElement("h1");
+
+            title.textContent =
+                "STARTUP ERROR";
+
+            const message =
+                document.createElement("pre");
+
+            message.style.whiteSpace =
+                "pre-wrap";
+
+            message.style.color =
+                "#b00020";
+
+            message.textContent =
+                event.reason?.message ||
+                String(event.reason);
+
+            startupStatus.append(
+                title,
+                message
+            );
+        }
+    );
+</script>
 </body>
 </html>
