@@ -10,12 +10,12 @@ const SNEAK_SPEED = 1.8;
 const REQUIRED_TERMINALS = 3;
 const REPAIR_TIME = 5;
 const INTERACT_DISTANCE = 3.4;
-
+const UP = new THREE.Vector3(0, 1, 0);
 const distanceXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const material = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: .78, metalness: .08, ...extra });
+const makeMaterial = (color, options = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0.08, ...options });
 
-function box(name, size, position, color, customMaterial = null) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), customMaterial || material(color));
+function makeBox(name, size, position, color, customMaterial = null) {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), customMaterial || makeMaterial(color));
     mesh.name = name;
     mesh.position.set(...position);
     return mesh;
@@ -77,7 +77,7 @@ export class Game {
         this.createCharacters();
         this.createHUD();
         this.createTouchControls();
-        this.bind();
+        this.bindEvents();
         this.running = true;
         this.clock.start();
         this.animate();
@@ -87,16 +87,16 @@ export class Game {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x071119);
         this.scene.fog = new THREE.Fog(0x071119, 20, 95);
-        this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, .08, 260);
+        this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 260);
         this.camera.position.set(0, PLAYER_HEIGHT, 35);
         this.camera.rotation.order = "YXZ";
         this.scene.add(new THREE.HemisphereLight(0x6389a0, 0x0d1113, 1.25));
         const sun = new THREE.DirectionalLight(0xb8dded, 1.2);
         sun.position.set(20, 30, 10);
         this.scene.add(sun);
-        const red = new THREE.PointLight(0xff2424, 2.1, 35, 2);
-        red.position.set(0, 5, 0);
-        this.scene.add(red);
+        const emergency = new THREE.PointLight(0xff2424, 2.1, 35, 2);
+        emergency.position.set(0, 5, 0);
+        this.scene.add(emergency);
     }
 
     createRenderer() {
@@ -108,269 +108,521 @@ export class Game {
     }
 
     createFacility() {
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100, 20, 20), material(0x222a2e));
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), makeMaterial(0x222a2e));
         floor.rotation.x = -Math.PI / 2;
         this.scene.add(floor);
         const grid = new THREE.GridHelper(100, 50, 0x4f626c, 0x36434a);
-        grid.position.y = .01;
+        grid.position.y = 0.01;
         this.scene.add(grid);
+
         [[0,-49,98,1],[0,49,98,1],[-49,0,1,98],[49,0,1,98],[-25,-20,1,38],[-25,26,1,34],[25,-24,1,34],[25,25,1,38],[0,-12,28,1],[8,12,30,1],[-18,34,28,1],[-36,4,20,1],[36,2,20,1]].forEach(([x,z,w,d]) => this.addWall(x,z,w,d));
         [[-36,-34],[-31,-34],[-36,-29],[35,33],[30,33],[35,28],[6,-27],[11,-27],[6,-22],[-8,22],[-3,22],[16,26],[21,26]].forEach(([x,z]) => this.addCrate(x,z));
-        for (let x = -40; x <= 40; x += 16) {
-            const lamp = box("CeilingLamp", [5,.12,.7], [x,5.1,-37], 0xd4e6ed, material(0xcfe8f2,{emissive:0x76b9d6,emissiveIntensity:.8}));
-            this.scene.add(lamp);
-        }
     }
 
-    addWall(x,z,w,d) {
-        const wall = box("Wall", [w,5,d], [x,2.5,z], 0x38444a);
-        this.scene.add(wall); this.walls.push(wall);
+    addWall(x, z, width, depth) {
+        const wall = makeBox("Wall", [width, 5, depth], [x, 2.5, z], 0x38444a);
+        this.scene.add(wall);
+        this.walls.push(wall);
     }
 
-    addCrate(x,z) {
-        const crate = box("Crate", [3.4,2.6,3.4], [x,1.3,z], 0x655f49);
-        this.scene.add(crate); this.obstacles.push(crate);
+    addCrate(x, z) {
+        const crate = makeBox("Crate", [3.4, 2.6, 3.4], [x, 1.3, z], 0x655f49);
+        this.scene.add(crate);
+        this.obstacles.push(crate);
     }
 
     createObjectives() {
         [[-38,0],[36,-30],[10,38]].forEach(([x,z], index) => {
-            const group = new THREE.Group(); group.position.set(x,0,z); group.name = `Terminal${index+1}`;
-            const screenMat = material(0x681f1f,{emissive:0xff2020,emissiveIntensity:1.2});
-            group.add(box("TerminalBody",[2,2.4,1.2],[0,1.2,0],0x263239),box("TerminalScreen",[1.3,.75,.08],[0,1.55,-.64],0,screenMat));
-            group.userData = { repaired:false, progress:0, screenMat, assigned:null };
-            this.scene.add(group); this.terminals.push(group);
+            const terminal = new THREE.Group();
+            terminal.position.set(x, 0, z);
+            terminal.name = `Terminal${index + 1}`;
+            const screenMaterial = makeMaterial(0x681f1f, { emissive: 0xff2020, emissiveIntensity: 1.2 });
+            terminal.add(
+                makeBox("TerminalBody", [2, 2.4, 1.2], [0, 1.2, 0], 0x263239),
+                makeBox("TerminalScreen", [1.3, 0.75, 0.08], [0, 1.55, -0.64], 0, screenMaterial)
+            );
+            terminal.userData = { repaired: false, progress: 0, screenMaterial, assigned: null };
+            this.scene.add(terminal);
+            this.terminals.push(terminal);
         });
-        this.exitGate = new THREE.Group(); this.exitGate.position.set(0,0,-47.5);
-        const frame = material(0x596871,{metalness:.5});
-        this.exitGate.add(box("Frame",[1,5,1],[-3.5,2.5,0],0,frame),box("Frame",[1,5,1],[3.5,2.5,0],0,frame),box("Frame",[8,1,1],[0,4.5,0],0,frame));
-        const door = box("Door",[6,4,.5],[0,2,0],0x5a1818,material(0x5a1818,{emissive:0x9d1515,emissiveIntensity:.5}));
-        this.exitGate.add(door); this.exitGate.userData = { open:false, door };
+
+        this.exitGate = new THREE.Group();
+        this.exitGate.position.set(0, 0, -47.5);
+        const frame = makeMaterial(0x596871, { metalness: 0.5 });
+        this.exitGate.add(
+            makeBox("Frame", [1,5,1], [-3.5,2.5,0], 0, frame),
+            makeBox("Frame", [1,5,1], [3.5,2.5,0], 0, frame),
+            makeBox("Frame", [8,1,1], [0,4.5,0], 0, frame)
+        );
+        const door = makeBox("Door", [6,4,0.5], [0,2,0], 0x5a1818, makeMaterial(0x5a1818, { emissive: 0x9d1515, emissiveIntensity: 0.5 }));
+        this.exitGate.add(door);
+        this.exitGate.userData = { open: false, door };
         this.scene.add(this.exitGate);
     }
 
-    createCharacter(type, x, z, color, player = false) {
-        const root = type === "PURSUER"
+    createCharacter(type, x, z, color) {
+        const character = type === "PURSUER"
             ? createPursuer()
-            : createEscapee({
-                jacketColor: color,
-                accentColor: new THREE.Color(color).offsetHSL(0, 0.08, 0.18).getHex()
-            });
-
-        root.position.set(x, 0, z);
-        root.userData.type = type;
-        root.userData.player = player;
-        root.userData.state = "IDLE";
-        root.userData.target = null;
-        root.userData.captured = false;
-        root.userData.escaped = false;
-        root.userData.health = 2;
-        root.userData.cooldown = 0;
-        root.userData.speed = 0;
-        root.userData.animator = new CharacterAnimator(root);
-
-        this.scene.add(root);
-        return root;
+            : createEscapee({ jacketColor: color, accentColor: new THREE.Color(color).offsetHSL(0, 0.08, 0.18).getHex() });
+        character.position.set(x, 0, z);
+        Object.assign(character.userData, {
+            type,
+            state: "IDLE",
+            target: null,
+            captured: false,
+            escaped: false,
+            health: 2,
+            speed: 0,
+            stuckTime: 0,
+            avoidanceSide: Math.random() < 0.5 ? -1 : 1,
+            animator: new CharacterAnimator(character)
+        });
+        this.scene.add(character);
+        return character;
     }
 
     createCharacters() {
+        const escapeeSpawns = [
+            new THREE.Vector3(-8, 0, 36),
+            new THREE.Vector3(0, 0, 38),
+            new THREE.Vector3(8, 0, 36),
+            new THREE.Vector3(14, 0, 32)
+        ];
+        const pursuerSpawn = new THREE.Vector3(-40, 0, -12);
+        const colors = [0x3e8fd1, 0x3fae72, 0xb07bd8, 0xd59a43];
+
+        if (!this.isSafeSpawn(pursuerSpawn.x, pursuerSpawn.z, 1)) {
+            throw new Error("The pursuer spawn point is blocked.");
+        }
+
         if (this.role === "ESCAPEE") {
-            this.playerType = "ESCAPEE";
-            [[-2,34],[2,34],[5,32]].forEach((p,i) => this.escapees.push(this.createCharacter("ESCAPEE",p[0],p[1],[0x3e8fd1,0x3fae72,0xb07bd8][i])));
-            this.pursuers.push(this.createCharacter("PURSUER",-35,-35,0x15191c));
+            this.camera.position.set(0, PLAYER_HEIGHT, 35);
+            this.yaw = Math.PI;
+            escapeeSpawns.slice(0, 3).forEach((position, index) => {
+                this.escapees.push(this.createCharacter("ESCAPEE", position.x, position.z, colors[index]));
+            });
+            const pursuer = this.createCharacter("PURSUER", pursuerSpawn.x, pursuerSpawn.z, 0x15191c);
+            pursuer.rotation.y = Math.atan2(-pursuerSpawn.x, -pursuerSpawn.z) + Math.PI;
+            this.pursuers.push(pursuer);
         } else {
-            this.playerType = "PURSUER";
-            this.camera.position.set(-35,PLAYER_HEIGHT,-35);
-            [[-8,34],[-2,36],[4,34],[10,36]].forEach((p,i) => this.escapees.push(this.createCharacter("ESCAPEE",p[0],p[1],[0x3e8fd1,0x3fae72,0xb07bd8,0xd59a43][i])));
+            this.camera.position.set(pursuerSpawn.x, PLAYER_HEIGHT, pursuerSpawn.z);
+            this.yaw = Math.atan2(pursuerSpawn.x, pursuerSpawn.z);
+            escapeeSpawns.forEach((position, index) => {
+                const escapee = this.createCharacter("ESCAPEE", position.x, position.z, colors[index]);
+                escapee.rotation.y = Math.PI;
+                this.escapees.push(escapee);
+            });
         }
     }
 
+    isSafeSpawn(x, z, radius = 0.9) {
+        if (Math.abs(x) > 46 || Math.abs(z) > 46) return false;
+        for (const object of [...this.walls, ...this.obstacles]) {
+            const bounds = new THREE.Box3().setFromObject(object);
+            if (x + radius > bounds.min.x && x - radius < bounds.max.x && z + radius > bounds.min.z && z - radius < bounds.max.z) return false;
+        }
+        return true;
+    }
+
     createHUD() {
-        this.hud = document.createElement("div"); this.hud.className = "game-hud";
-        this.hud.innerHTML = `<div class="hud-stack"><div class="hud-panel"><div class="hud-title">RUN FOR LIVE</div><div class="hud-row"><span>ROLE</span><strong data-role>${this.role}</strong></div><div class="hud-row"><span>TIME</span><strong data-time>10:00</strong></div><div class="hud-row"><span>TERMINALS</span><strong data-terminals>0 / 3</strong></div><div class="hud-row"><span>ESCAPEES</span><strong data-escapees>4 ACTIVE</strong></div><div class="hud-row"><span>STAMINA</span><strong data-stamina>100%</strong></div><div class="bar"><div data-stamina-bar></div></div></div></div><div class="crosshair"></div><div class="threat" data-threat>PURSUER DETECTED</div><div class="center-prompt" data-prompt></div>`;
+        this.hud = document.createElement("div");
+        this.hud.className = "game-hud";
+        this.hud.innerHTML = `<div class="hud-stack"><div class="hud-panel"><div class="hud-title">RUN FOR LIVE</div><div class="hud-row"><span>ROLE</span><strong>${this.role}</strong></div><div class="hud-row"><span>TIME</span><strong data-time>10:00</strong></div><div class="hud-row"><span>TERMINALS</span><strong data-terminals>0 / 3</strong></div><div class="hud-row"><span>ESCAPEES</span><strong data-escapees>4 ACTIVE</strong></div><div class="hud-row"><span>STAMINA</span><strong data-stamina>100%</strong></div><div class="bar"><div data-stamina-bar></div></div></div></div><div class="crosshair"></div><div class="threat" data-threat>PURSUER DETECTED</div><div class="center-prompt" data-prompt></div>`;
         document.body.appendChild(this.hud);
-        this.hudValues = { time:this.hud.querySelector("[data-time]"), terminals:this.hud.querySelector("[data-terminals]"), escapees:this.hud.querySelector("[data-escapees]"), stamina:this.hud.querySelector("[data-stamina]"), staminaBar:this.hud.querySelector("[data-stamina-bar]"), threat:this.hud.querySelector("[data-threat]"), prompt:this.hud.querySelector("[data-prompt]") };
+        this.hudValues = {
+            time: this.hud.querySelector("[data-time]"),
+            terminals: this.hud.querySelector("[data-terminals]"),
+            escapees: this.hud.querySelector("[data-escapees]"),
+            stamina: this.hud.querySelector("[data-stamina]"),
+            staminaBar: this.hud.querySelector("[data-stamina-bar]"),
+            threat: this.hud.querySelector("[data-threat]"),
+            prompt: this.hud.querySelector("[data-prompt]")
+        };
     }
 
     createTouchControls() {
-        const root = document.createElement("div"); root.id = "touch-controls";
+        const root = document.createElement("div");
+        root.id = "touch-controls";
         root.innerHTML = `<div class="look-zone" data-look></div><div class="joystick" data-joystick><div class="joystick-stick" data-stick></div></div><div class="touch-actions"><button class="touch-btn" data-run>RUN</button><button class="touch-btn" data-use>USE</button><button class="touch-btn" data-sneak>SNEAK</button><button class="touch-btn" data-action>${this.role === "PURSUER" ? "CAPTURE" : "PING"}</button></div><button class="menu-touch" data-menu>â°</button>`;
-        document.body.appendChild(root); this.touchRoot = root;
+        document.body.appendChild(root);
+        this.touchRoot = root;
         const look = root.querySelector("[data-look]");
-        look.addEventListener("pointerdown", e => this.beginLook(e)); look.addEventListener("pointermove", e => this.moveLook(e)); look.addEventListener("pointerup", e => this.endLook(e)); look.addEventListener("pointercancel", e => this.endLook(e));
-        const joy = root.querySelector("[data-joystick]"); this.joyStick = root.querySelector("[data-stick]");
-        joy.addEventListener("pointerdown", e => this.beginJoystick(e,joy)); joy.addEventListener("pointermove", e => this.moveJoystick(e,joy)); joy.addEventListener("pointerup", e => this.endJoystick(e)); joy.addEventListener("pointercancel", e => this.endJoystick(e));
-        this.bindTouchHold(root.querySelector("[data-run]"), value => this.touch.sprint = value);
-        this.bindTouchHold(root.querySelector("[data-use]"), value => this.touch.interact = value);
-        root.querySelector("[data-sneak]").addEventListener("pointerdown", e => { e.preventDefault(); this.touch.sneak = !this.touch.sneak; e.currentTarget.classList.toggle("active",this.touch.sneak); });
-        root.querySelector("[data-action]").addEventListener("pointerdown", e => { e.preventDefault(); if(this.role === "PURSUER") this.tryCapture(); });
+        look.addEventListener("pointerdown", event => this.beginLook(event));
+        look.addEventListener("pointermove", event => this.moveLook(event));
+        look.addEventListener("pointerup", event => this.endLook(event));
+        look.addEventListener("pointercancel", event => this.endLook(event));
+        const joystick = root.querySelector("[data-joystick]");
+        this.joystickStick = root.querySelector("[data-stick]");
+        joystick.addEventListener("pointerdown", event => this.beginJoystick(event, joystick));
+        joystick.addEventListener("pointermove", event => this.moveJoystick(event, joystick));
+        joystick.addEventListener("pointerup", event => this.endJoystick(event));
+        joystick.addEventListener("pointercancel", event => this.endJoystick(event));
+        this.bindTouchHold(root.querySelector("[data-run]"), value => { this.touch.sprint = value; });
+        this.bindTouchHold(root.querySelector("[data-use]"), value => { this.touch.interact = value; });
+        root.querySelector("[data-sneak]").addEventListener("pointerdown", event => {
+            event.preventDefault();
+            this.touch.sneak = !this.touch.sneak;
+            event.currentTarget.classList.toggle("active", this.touch.sneak);
+        });
+        root.querySelector("[data-action]").addEventListener("pointerdown", event => {
+            event.preventDefault();
+            if (this.role === "PURSUER") this.tryCapture();
+        });
         root.querySelector("[data-menu]").addEventListener("click", () => this.setPaused(true));
     }
 
     bindTouchHold(element, callback) {
-        element.addEventListener("pointerdown", e => { e.preventDefault(); element.classList.add("active"); callback(true); });
-        ["pointerup","pointercancel","pointerleave"].forEach(name => element.addEventListener(name, e => { e.preventDefault(); element.classList.remove("active"); callback(false); }));
+        element.addEventListener("pointerdown", event => { event.preventDefault(); element.classList.add("active"); callback(true); });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(name => element.addEventListener(name, event => { event.preventDefault(); element.classList.remove("active"); callback(false); }));
     }
 
-    beginLook(e) { e.preventDefault(); this.dragPointer=e.pointerId; this.dragX=e.clientX; this.dragY=e.clientY; e.currentTarget.setPointerCapture?.(e.pointerId); }
-    moveLook(e) { if(e.pointerId!==this.dragPointer)return; e.preventDefault(); this.applyLook(e.clientX-this.dragX,e.clientY-this.dragY,.005); this.dragX=e.clientX; this.dragY=e.clientY; }
-    endLook(e) { if(e.pointerId===this.dragPointer)this.dragPointer=null; }
-    beginJoystick(e,zone) { e.preventDefault(); this.joystick.pointer=e.pointerId; zone.setPointerCapture?.(e.pointerId); this.moveJoystick(e,zone); }
-    moveJoystick(e,zone) { if(e.pointerId!==this.joystick.pointer)return; const r=zone.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2; let x=e.clientX-cx,y=e.clientY-cy; const max=45,d=Math.hypot(x,y); if(d>max){x=x/d*max;y=y/d*max;} this.joystick.x=x/max; this.joystick.y=y/max; this.joyStick.style.transform=`translate(${x}px,${y}px)`; }
-    endJoystick(e) { if(e.pointerId!==this.joystick.pointer)return; this.joystick={x:0,y:0,pointer:null}; this.joyStick.style.transform="translate(0,0)"; }
+    beginLook(event) { event.preventDefault(); this.dragPointer = event.pointerId; this.dragX = event.clientX; this.dragY = event.clientY; event.currentTarget.setPointerCapture?.(event.pointerId); }
+    moveLook(event) { if (event.pointerId !== this.dragPointer) return; event.preventDefault(); this.applyLook(event.clientX - this.dragX, event.clientY - this.dragY, 0.005); this.dragX = event.clientX; this.dragY = event.clientY; }
+    endLook(event) { if (event.pointerId === this.dragPointer) this.dragPointer = null; }
+    beginJoystick(event, zone) { event.preventDefault(); this.joystick.pointer = event.pointerId; zone.setPointerCapture?.(event.pointerId); this.moveJoystick(event, zone); }
+    moveJoystick(event, zone) {
+        if (event.pointerId !== this.joystick.pointer) return;
+        const bounds = zone.getBoundingClientRect();
+        const centerX = bounds.left + bounds.width / 2;
+        const centerY = bounds.top + bounds.height / 2;
+        let x = event.clientX - centerX;
+        let y = event.clientY - centerY;
+        const maximum = 45;
+        const distance = Math.hypot(x, y);
+        if (distance > maximum) { x = x / distance * maximum; y = y / distance * maximum; }
+        this.joystick.x = x / maximum;
+        this.joystick.y = y / maximum;
+        this.joystickStick.style.transform = `translate(${x}px, ${y}px)`;
+    }
+    endJoystick(event) { if (event.pointerId !== this.joystick.pointer) return; this.joystick = { x: 0, y: 0, pointer: null }; this.joystickStick.style.transform = "translate(0, 0)"; }
 
-    bind() {
-        addEventListener("resize",this.resize); addEventListener("keydown",this.keyDown); addEventListener("keyup",this.keyUp); addEventListener("mousemove",this.mouseMove); document.addEventListener("pointerlockchange",this.pointerLockChange);
-        this.renderer.domElement.addEventListener("click",() => { if(!this.isTouch&&!this.paused&&!this.ended) this.renderer.domElement.requestPointerLock?.(); });
-        this.renderer.domElement.addEventListener("pointerdown",e=>{if(e.pointerType==="mouse"&&document.pointerLockElement!==this.renderer.domElement){this.beginLook(e);}});
-        this.renderer.domElement.addEventListener("pointermove",e=>{if(e.pointerType==="mouse"&&document.pointerLockElement!==this.renderer.domElement)this.moveLook(e);});
-        this.renderer.domElement.addEventListener("pointerup",e=>this.endLook(e));
+    bindEvents() {
+        addEventListener("resize", this.resize);
+        addEventListener("keydown", this.keyDown);
+        addEventListener("keyup", this.keyUp);
+        addEventListener("mousemove", this.mouseMove);
+        document.addEventListener("pointerlockchange", this.pointerLockChange);
+        this.renderer.domElement.addEventListener("click", () => { if (!this.isTouch && !this.paused && !this.ended) this.renderer.domElement.requestPointerLock?.(); });
+        this.renderer.domElement.addEventListener("pointerdown", event => { if (event.pointerType === "mouse" && document.pointerLockElement !== this.renderer.domElement) this.beginLook(event); });
+        this.renderer.domElement.addEventListener("pointermove", event => { if (event.pointerType === "mouse" && document.pointerLockElement !== this.renderer.domElement) this.moveLook(event); });
+        this.renderer.domElement.addEventListener("pointerup", event => this.endLook(event));
     }
 
-    keyDown(e) { if(["KeyW","KeyA","KeyS","KeyD","KeyR","KeyE","ShiftLeft","ShiftRight","Space"].includes(e.code))e.preventDefault(); if(e.code==="Escape"&&!e.repeat){this.setPaused(!this.paused);return;} if(e.code==="Space"&&!e.repeat&&this.role==="PURSUER")this.tryCapture(); this.keys.add(e.code); }
-    keyUp(e) { this.keys.delete(e.code); if(e.code==="KeyE")this.repairProgress=0; }
-    mouseMove(e) { if(document.pointerLockElement!==this.renderer.domElement||this.paused||this.ended)return; this.applyLook(e.movementX,e.movementY,.0023); }
-    applyLook(dx,dy,sensitivity) { this.yaw-=dx*sensitivity; this.pitch=THREE.MathUtils.clamp(this.pitch-dy*sensitivity,-1.48,1.48); }
-    pointerLockChange() { if(!this.isTouch&&document.pointerLockElement!==this.renderer.domElement&&!this.paused&&!this.ended&&this.running)this.setPaused(true); }
+    keyDown(event) {
+        if (["KeyW","KeyA","KeyS","KeyD","KeyR","KeyE","ShiftLeft","ShiftRight","Space"].includes(event.code)) event.preventDefault();
+        if (event.code === "Escape" && !event.repeat) { this.setPaused(!this.paused); return; }
+        if (event.code === "Space" && !event.repeat && this.role === "PURSUER") this.tryCapture();
+        this.keys.add(event.code);
+    }
+    keyUp(event) { this.keys.delete(event.code); if (event.code === "KeyE") this.repairProgress = 0; }
+    mouseMove(event) { if (document.pointerLockElement !== this.renderer.domElement || this.paused || this.ended) return; this.applyLook(event.movementX, event.movementY, 0.0023); }
+    applyLook(dx, dy, sensitivity) { this.yaw -= dx * sensitivity; this.pitch = THREE.MathUtils.clamp(this.pitch - dy * sensitivity, -1.48, 1.48); }
+    pointerLockChange() { if (!this.isTouch && document.pointerLockElement !== this.renderer.domElement && !this.paused && !this.ended && this.running) this.setPaused(true); }
 
-    updatePlayer(dt) {
-        if(this.paused||this.ended)return;
-        let forward=(this.keys.has("KeyW")?1:0)-(this.keys.has("KeyS")?1:0)-this.joystick.y;
-        let side=(this.keys.has("KeyD")?1:0)-(this.keys.has("KeyA")?1:0)+this.joystick.x;
-        const sneak=this.keys.has("ShiftLeft")||this.keys.has("ShiftRight")||this.touch.sneak;
-        const sprint=((this.keys.has("KeyW")&&this.keys.has("KeyR"))||this.touch.sprint)&&forward>.1&&!sneak&&this.stamina>0;
-        const speed=sneak?SNEAK_SPEED:sprint?SPRINT_SPEED:WALK_SPEED;
-        this.stamina=THREE.MathUtils.clamp(this.stamina+(sprint?-25:17)*dt,0,100);
-        const len=Math.hypot(forward,side); if(len>1){forward/=len;side/=len;}
-        this.forward.set(-Math.sin(this.yaw),0,-Math.cos(this.yaw));
-        this.right.set(Math.cos(this.yaw),0,-Math.sin(this.yaw));
-        this.move.set(0,0,0).addScaledVector(this.forward,forward).addScaledVector(this.right,side).multiplyScalar(speed*dt);
-        const nx=this.camera.position.x+this.move.x,nz=this.camera.position.z+this.move.z;
-        if(!this.collides(nx,this.camera.position.z))this.camera.position.x=nx;
-        if(!this.collides(this.camera.position.x,nz))this.camera.position.z=nz;
-        this.camera.rotation.set(this.pitch,this.yaw,0,"YXZ");
+    updatePlayer(deltaTime) {
+        if (this.paused || this.ended) return;
+        let forwardInput = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0) - this.joystick.y;
+        let sideInput = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0) + this.joystick.x;
+        const sneaking = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") || this.touch.sneak;
+        const sprinting = ((this.keys.has("KeyW") && this.keys.has("KeyR")) || this.touch.sprint) && forwardInput > 0.1 && !sneaking && this.stamina > 0;
+        const speed = sneaking ? SNEAK_SPEED : sprinting ? SPRINT_SPEED : WALK_SPEED;
+        this.stamina = THREE.MathUtils.clamp(this.stamina + (sprinting ? -25 : 17) * deltaTime, 0, 100);
+        const length = Math.hypot(forwardInput, sideInput);
+        if (length > 1) { forwardInput /= length; sideInput /= length; }
+        this.forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+        this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+        this.move.set(0,0,0).addScaledVector(this.forward, forwardInput).addScaledVector(this.right, sideInput).multiplyScalar(speed * deltaTime);
+        const nextX = this.camera.position.x + this.move.x;
+        const nextZ = this.camera.position.z + this.move.z;
+        if (!this.collides(nextX, this.camera.position.z, PLAYER_RADIUS)) this.camera.position.x = nextX;
+        if (!this.collides(this.camera.position.x, nextZ, PLAYER_RADIUS)) this.camera.position.z = nextZ;
+        this.camera.rotation.set(this.pitch, this.yaw, 0, "YXZ");
     }
 
-    collides(x,z) {
-        for(const object of [...this.walls,...this.obstacles]) { const b=new THREE.Box3().setFromObject(object); if(x+PLAYER_RADIUS>b.min.x&&x-PLAYER_RADIUS<b.max.x&&z+PLAYER_RADIUS>b.min.z&&z-PLAYER_RADIUS<b.max.z)return true; }
-        return false;
+    collides(x, z, radius = PLAYER_RADIUS) {
+        for (const object of [...this.walls, ...this.obstacles]) {
+            const bounds = new THREE.Box3().setFromObject(object);
+            if (x + radius > bounds.min.x && x - radius < bounds.max.x && z + radius > bounds.min.z && z - radius < bounds.max.z) return true;
+        }
+        return Math.abs(x) + radius > 47.5 || Math.abs(z) + radius > 47.5;
     }
 
-    updateEscapeeNPCs(dt) {
-        for(const npc of this.escapees) {
-            if(npc.userData.captured||npc.userData.escaped)continue;
-            const pursuer=this.getNearestPursuer(npc.position); const danger=pursuer&&distanceXZ(npc.position,pursuer.position)<13;
-            if(danger){npc.userData.state="FLEE"; const dir=npc.position.clone().sub(pursuer.position).setY(0).normalize(); this.moveNPC(npc,dir,4.9,dt); continue;}
-            if(this.repaired>=REQUIRED_TERMINALS){npc.userData.state="ESCAPE"; this.moveNPCToward(npc,this.exitGate.position,3.8,dt); if(distanceXZ(npc.position,this.exitGate.position)<2){npc.userData.escaped=true;npc.visible=false;} continue;}
-            let terminal=this.terminals.find(t=>!t.userData.repaired&&(!t.userData.assigned||t.userData.assigned===npc));
-            if(!terminal)terminal=this.terminals.find(t=>!t.userData.repaired);
-            if(!terminal){npc.userData.state="IDLE";continue;}
-            terminal.userData.assigned=npc; npc.userData.target=terminal;
-            if(distanceXZ(npc.position,terminal.position)>2){npc.userData.state="SEARCH";this.moveNPCToward(npc,terminal.position,2.8,dt);} else {npc.userData.state="REPAIR";terminal.userData.progress+=dt/REPAIR_TIME*.72;if(terminal.userData.progress>=1)this.completeTerminal(terminal);}
+    updateEscapeeNPCs(deltaTime) {
+        for (const npc of this.escapees) {
+            if (npc.userData.captured || npc.userData.escaped) continue;
+            const pursuer = this.getNearestPursuer(npc.position);
+            const danger = pursuer && distanceXZ(npc.position, pursuer.position) < 13;
+            if (danger) {
+                npc.userData.state = "FLEE";
+                const direction = npc.position.clone().sub(pursuer.position).setY(0).normalize();
+                this.moveNPC(npc, direction, 4.9, deltaTime);
+                continue;
+            }
+            if (this.repaired >= REQUIRED_TERMINALS) {
+                npc.userData.state = "ESCAPE";
+                this.moveNPCToward(npc, this.exitGate.position, 3.8, deltaTime);
+                if (distanceXZ(npc.position, this.exitGate.position) < 2) { npc.userData.escaped = true; npc.visible = false; }
+                continue;
+            }
+            let terminal = this.terminals.find(item => !item.userData.repaired && (!item.userData.assigned || item.userData.assigned === npc));
+            if (!terminal) terminal = this.terminals.find(item => !item.userData.repaired);
+            if (!terminal) { npc.userData.state = "IDLE"; continue; }
+            terminal.userData.assigned = npc;
+            npc.userData.target = terminal;
+            if (distanceXZ(npc.position, terminal.position) > 2) {
+                npc.userData.state = "SEARCH";
+                this.moveNPCToward(npc, terminal.position, 2.8, deltaTime);
+            } else {
+                npc.userData.state = "REPAIR";
+                npc.userData.speed = 0;
+                terminal.userData.progress += deltaTime / REPAIR_TIME * 0.72;
+                if (terminal.userData.progress >= 1) this.completeTerminal(terminal);
+            }
         }
     }
 
-    updatePursuerNPCs(dt) {
-        for(const npc of this.pursuers) {
-            let target=this.getNearestActiveEscapee(npc.position,true); if(!target){npc.userData.state="PATROL";continue;}
-            const d=distanceXZ(npc.position,target.position); npc.userData.state=d<24?"CHASE":"PATROL";
-            if(npc.userData.state==="CHASE")this.moveNPCToward(npc,target.position,4.7,dt); else {const patrol=this.terminals.find(t=>!t.userData.repaired)||this.exitGate;this.moveNPCToward(npc,patrol.position,2.2,dt);}
-            if(d<1.25){if(target===this.camera){this.endMatch("CAUGHT");}else{target.userData.captured=true;target.visible=false;}}
+    updatePursuerNPCs(deltaTime) {
+        for (const npc of this.pursuers) {
+            const target = this.getNearestActiveEscapee(npc.position, true);
+            if (!target) { npc.userData.state = "PATROL"; npc.userData.speed = 0; continue; }
+            const distance = distanceXZ(npc.position, target.position);
+            npc.userData.state = distance < 24 ? "CHASE" : "PATROL";
+            if (npc.userData.state === "CHASE") this.moveNPCToward(npc, target.position, 4.7, deltaTime);
+            else this.moveNPCToward(npc, (this.terminals.find(item => !item.userData.repaired) || this.exitGate).position, 2.2, deltaTime);
+            if (distance < 1.25) {
+                if (target === this.camera) this.endMatch("CAUGHT");
+                else { target.userData.captured = true; target.userData.state = "DOWNED"; }
+            }
         }
     }
 
-    getNearestPursuer(position){return this.pursuers.sort((a,b)=>distanceXZ(position,a.position)-distanceXZ(position,b.position))[0]||null;}
-    getNearestActiveEscapee(position,includePlayer){const list=this.escapees.filter(n=>!n.userData.captured&&!n.userData.escaped); if(includePlayer&&this.role==="ESCAPEE")list.push(this.camera); return list.sort((a,b)=>distanceXZ(position,a.position)-distanceXZ(position,b.position))[0]||null;}
-    moveNPCToward(npc,target,speed,dt){const dir=target.clone().sub(npc.position).setY(0);if(dir.lengthSq()<.01)return;dir.normalize();this.moveNPC(npc,dir,speed,dt);}
-    moveNPC(npc, dir, speed, dt) {
-        const nx = npc.position.x + dir.x * speed * dt;
-        const nz = npc.position.z + dir.z * speed * dt;
+    getNearestPursuer(position) {
+        return [...this.pursuers].sort((a,b) => distanceXZ(position,a.position) - distanceXZ(position,b.position))[0] || null;
+    }
+
+    getNearestActiveEscapee(position, includePlayer) {
+        const list = this.escapees.filter(npc => !npc.userData.captured && !npc.userData.escaped);
+        if (includePlayer && this.role === "ESCAPEE") list.push(this.camera);
+        return list.sort((a,b) => distanceXZ(position,a.position) - distanceXZ(position,b.position))[0] || null;
+    }
+
+    moveNPCToward(npc, target, speed, deltaTime) {
+        const desired = target.clone().sub(npc.position).setY(0);
+        if (desired.lengthSq() < 0.001) { npc.userData.speed = 0; return; }
+        this.moveNPC(npc, desired.normalize(), speed, deltaTime);
+    }
+
+    moveNPC(npc, desiredDirection, speed, deltaTime) {
+        const radius = npc.userData.type === "PURSUER" ? 0.78 : 0.52;
+        const preferred = npc.userData.avoidanceSide || 1;
+        const angles = [0, 25 * preferred, -25 * preferred, 50 * preferred, -50 * preferred, 75 * preferred, -75 * preferred, 110 * preferred, -110 * preferred, 180];
+        let selected = null;
+
+        for (const degrees of angles) {
+            const candidate = desiredDirection.clone().applyAxisAngle(UP, THREE.MathUtils.degToRad(degrees));
+            const probe = Math.max(radius + 0.55, speed * deltaTime * 3);
+            if (!this.collides(npc.position.x + candidate.x * probe, npc.position.z + candidate.z * probe, radius)) {
+                selected = candidate;
+                if (degrees !== 0 && degrees !== 180) npc.userData.avoidanceSide = Math.sign(degrees) || preferred;
+                break;
+            }
+        }
+
+        if (!selected) {
+            npc.userData.stuckTime += deltaTime;
+            npc.userData.speed = 0;
+            if (npc.userData.stuckTime > 0.55) {
+                npc.userData.avoidanceSide *= -1;
+                const escape = desiredDirection.clone().multiplyScalar(-1).applyAxisAngle(UP, THREE.MathUtils.degToRad(55 * npc.userData.avoidanceSide));
+                if (!this.collides(npc.position.x + escape.x, npc.position.z + escape.z, radius)) {
+                    npc.position.addScaledVector(escape, 0.9);
+                    npc.userData.stuckTime = 0;
+                }
+            }
+            return;
+        }
+
+        const distance = speed * deltaTime;
+        const nextX = npc.position.x + selected.x * distance;
+        const nextZ = npc.position.z + selected.z * distance;
         let moved = false;
+        if (!this.collides(nextX, npc.position.z, radius)) { npc.position.x = nextX; moved = true; }
+        if (!this.collides(npc.position.x, nextZ, radius)) { npc.position.z = nextZ; moved = true; }
 
-        if (!this.collides(nx, npc.position.z)) {
-            npc.position.x = nx;
-            moved = true;
-        }
-
-        if (!this.collides(npc.position.x, nz)) {
-            npc.position.z = nz;
-            moved = true;
-        }
-
-        npc.rotation.y = Math.atan2(dir.x, dir.z);
+        const targetRotation = Math.atan2(selected.x, selected.z) + Math.PI;
+        npc.rotation.y = this.lerpAngle(npc.rotation.y, targetRotation, Math.min(1, deltaTime * 10));
         npc.userData.speed = moved ? speed : 0;
+        npc.userData.stuckTime = moved ? 0 : npc.userData.stuckTime + deltaTime;
+    }
+
+    lerpAngle(current, target, amount) {
+        const difference = THREE.MathUtils.euclideanModulo(target - current + Math.PI, Math.PI * 2) - Math.PI;
+        return current + difference * amount;
     }
 
     updateCharacterAnimations(deltaTime) {
         for (const character of [...this.escapees, ...this.pursuers]) {
             if (!character.visible) continue;
-
-            let animationState = character.userData.state || "IDLE";
-
-            if (character.userData.captured) {
-                animationState = "DOWNED";
-            } else if (animationState === "SEARCH") {
-                animationState = "WALK";
-            } else if (animationState === "PATROL") {
-                animationState = "WALK";
-            } else if (animationState === "ESCAPE") {
-                animationState = "RUN";
-            }
-
+            let state = character.userData.state || "IDLE";
+            if (state === "SEARCH" || state === "PATROL") state = "WALK";
+            if (state === "ESCAPE") state = "RUN";
             character.userData.animator?.update(deltaTime, {
-                state: animationState,
+                state,
                 speed: character.userData.speed || 0,
                 injured: character.userData.health === 1
             });
         }
     }
 
-    updateInteraction(dt) {
-        if(this.paused||this.ended)return;
-        const interacting=this.keys.has("KeyE")||this.touch.interact;
-        this.currentInteraction=null;
-        if(this.role==="ESCAPEE") {
-            const terminal=this.terminals.filter(t=>!t.userData.repaired).sort((a,b)=>distanceXZ(this.camera.position,a.position)-distanceXZ(this.camera.position,b.position))[0];
-            if(terminal&&distanceXZ(this.camera.position,terminal.position)<INTERACT_DISTANCE){this.currentInteraction={type:"TERMINAL",object:terminal};this.prompt("HOLD E / USE TO RESTORE");}
-            else if(distanceXZ(this.camera.position,this.exitGate.position)<4){this.currentInteraction={type:"EXIT"};this.prompt(this.exitGate.userData.open?"PRESS E / USE TO ESCAPE":`${REQUIRED_TERMINALS-this.repaired} TERMINALS REMAINING`);} else this.prompt(null);
-            if(interacting&&this.currentInteraction?.type==="TERMINAL"){this.repairProgress+=dt;this.currentInteraction.object.userData.progress=Math.max(this.currentInteraction.object.userData.progress,this.repairProgress/REPAIR_TIME);this.prompt(`RESTORING ${Math.round(this.currentInteraction.object.userData.progress*100)}%`);if(this.currentInteraction.object.userData.progress>=1){this.completeTerminal(this.currentInteraction.object);this.repairProgress=0;}}
-            else if(interacting&&this.currentInteraction?.type==="EXIT"&&this.exitGate.userData.open)this.endMatch("ESCAPED"); else if(!interacting)this.repairProgress=0;
-        } else {this.prompt("SPACE / CAPTURE NEAR AN ESCAPEE");}
+    updateInteraction(deltaTime) {
+        if (this.paused || this.ended) return;
+        const interacting = this.keys.has("KeyE") || this.touch.interact;
+        this.currentInteraction = null;
+
+        if (this.role === "ESCAPEE") {
+            const terminal = this.terminals.filter(item => !item.userData.repaired).sort((a,b) => distanceXZ(this.camera.position,a.position) - distanceXZ(this.camera.position,b.position))[0];
+            if (terminal && distanceXZ(this.camera.position, terminal.position) < INTERACT_DISTANCE) {
+                this.currentInteraction = { type: "TERMINAL", object: terminal };
+                this.prompt("HOLD E / USE TO RESTORE");
+            } else if (distanceXZ(this.camera.position, this.exitGate.position) < 4) {
+                this.currentInteraction = { type: "EXIT" };
+                this.prompt(this.exitGate.userData.open ? "PRESS E / USE TO ESCAPE" : `${REQUIRED_TERMINALS - this.repaired} TERMINALS REMAINING`);
+            } else this.prompt(null);
+
+            if (interacting && this.currentInteraction?.type === "TERMINAL") {
+                this.repairProgress += deltaTime;
+                const terminalObject = this.currentInteraction.object;
+                terminalObject.userData.progress = Math.max(terminalObject.userData.progress, this.repairProgress / REPAIR_TIME);
+                this.prompt(`RESTORING ${Math.round(terminalObject.userData.progress * 100)}%`);
+                if (terminalObject.userData.progress >= 1) { this.completeTerminal(terminalObject); this.repairProgress = 0; }
+            } else if (interacting && this.currentInteraction?.type === "EXIT" && this.exitGate.userData.open) this.endMatch("ESCAPED");
+            else if (!interacting) this.repairProgress = 0;
+        } else this.prompt("SPACE / CAPTURE NEAR AN ESCAPEE");
     }
 
-    completeTerminal(terminal){if(terminal.userData.repaired)return;terminal.userData.repaired=true;terminal.userData.progress=1;terminal.userData.screenMat.color.set(0x1f7848);terminal.userData.screenMat.emissive.set(0x29ff82);this.repaired++;if(this.repaired>=REQUIRED_TERMINALS){this.exitGate.userData.open=true;this.exitGate.userData.door.visible=false;}}
-    tryCapture(){if(this.role!=="PURSUER"||this.paused||this.ended)return;const target=this.getNearestActiveEscapee(this.camera.position,false);if(target&&distanceXZ(this.camera.position,target.position)<2.2){target.userData.health--;if(target.userData.health<=0){target.userData.captured=true;target.visible=false;} else {const away=target.position.clone().sub(this.camera.position).setY(0).normalize();target.position.addScaledVector(away,4);}}}
-    prompt(text){this.hudValues.prompt.textContent=text||"";this.hudValues.prompt.classList.toggle("visible",Boolean(text));}
+    completeTerminal(terminal) {
+        if (terminal.userData.repaired) return;
+        terminal.userData.repaired = true;
+        terminal.userData.progress = 1;
+        terminal.userData.screenMaterial.color.set(0x1f7848);
+        terminal.userData.screenMaterial.emissive.set(0x29ff82);
+        this.repaired += 1;
+        if (this.repaired >= REQUIRED_TERMINALS) { this.exitGate.userData.open = true; this.exitGate.userData.door.visible = false; }
+    }
 
-    updateMatch(dt) {
-        if(this.paused||this.ended)return;this.elapsed+=dt;if(this.elapsed>=MATCH_TIME)this.endMatch(this.role==="PURSUER"?"PURSUER_WIN":"TIME_EXPIRED");
-        const active=this.escapees.filter(n=>!n.userData.captured&&!n.userData.escaped).length;
-        const escaped=this.escapees.filter(n=>n.userData.escaped).length;
-        if(this.role==="PURSUER"&&active===0)this.endMatch(escaped>0?"ESCAPEES_WIN":"PURSUER_WIN");
-        if(this.role==="ESCAPEE"&&this.exitGate.userData.open&&escaped>=3)this.endMatch("TEAM_ESCAPED");
+    tryCapture() {
+        if (this.role !== "PURSUER" || this.paused || this.ended) return;
+        const target = this.getNearestActiveEscapee(this.camera.position, false);
+        if (!target || distanceXZ(this.camera.position, target.position) >= 2.2) return;
+        target.userData.health -= 1;
+        if (target.userData.health <= 0) { target.userData.captured = true; target.userData.state = "DOWNED"; }
+        else target.position.addScaledVector(target.position.clone().sub(this.camera.position).setY(0).normalize(), 4);
+    }
+
+    prompt(text) { this.hudValues.prompt.textContent = text || ""; this.hudValues.prompt.classList.toggle("visible", Boolean(text)); }
+
+    updateMatch(deltaTime) {
+        if (this.paused || this.ended) return;
+        this.elapsed += deltaTime;
+        if (this.elapsed >= MATCH_TIME) this.endMatch(this.role === "PURSUER" ? "PURSUER WIN" : "TIME EXPIRED");
+        const active = this.escapees.filter(npc => !npc.userData.captured && !npc.userData.escaped).length;
+        if (this.role === "PURSUER" && active === 0) this.endMatch("PURSUER WIN");
     }
 
     updateHUD() {
-        const remain=Math.max(0,MATCH_TIME-this.elapsed),m=Math.floor(remain/60),s=Math.floor(remain%60);this.hudValues.time.textContent=`${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;this.hudValues.terminals.textContent=`${this.repaired} / ${REQUIRED_TERMINALS}`;
-        const active=this.escapees.filter(n=>!n.userData.captured&&!n.userData.escaped).length+(this.role==="ESCAPEE"?1:0);this.hudValues.escapees.textContent=`${active} ACTIVE`;const st=Math.round(this.stamina);this.hudValues.stamina.textContent=`${st}%`;this.hudValues.staminaBar.style.width=`${st}%`;
-        const pursuer=this.getNearestPursuer(this.camera.position);this.hudValues.threat.classList.toggle("visible",this.role==="ESCAPEE"&&pursuer&&distanceXZ(this.camera.position,pursuer.position)<15);
+        const remaining = Math.max(0, MATCH_TIME - this.elapsed);
+        const minutes = Math.floor(remaining / 60);
+        const seconds = Math.floor(remaining % 60);
+        this.hudValues.time.textContent = `${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}`;
+        this.hudValues.terminals.textContent = `${this.repaired} / ${REQUIRED_TERMINALS}`;
+        const active = this.escapees.filter(npc => !npc.userData.captured && !npc.userData.escaped).length + (this.role === "ESCAPEE" ? 1 : 0);
+        this.hudValues.escapees.textContent = `${active} ACTIVE`;
+        const stamina = Math.round(this.stamina);
+        this.hudValues.stamina.textContent = `${stamina}%`;
+        this.hudValues.staminaBar.style.width = `${stamina}%`;
+        const pursuer = this.getNearestPursuer(this.camera.position);
+        this.hudValues.threat.classList.toggle("visible", this.role === "ESCAPEE" && pursuer && distanceXZ(this.camera.position, pursuer.position) < 15);
     }
 
-    setPaused(value){if(this.ended)return;this.paused=value;if(value){document.exitPointerLock?.();this.showOverlay("PAUSED","The match is waiting.",[{label:"RESUME",action:()=>{this.hideOverlay();this.paused=false;if(!this.isTouch)this.renderer.domElement.requestPointerLock?.();}},{label:"BACK TO MENU",action:()=>{this.stop();this.onExit?.();}}]);}}
-    showOverlay(title,message,actions){this.hideOverlay();this.overlay=document.createElement("section");this.overlay.className="overlay";this.overlay.innerHTML=`<article class="overlay-card"><p class="eyebrow">RUN FOR LIVE</p><h2>${title}</h2><p>${message}</p><div class="menu-actions" data-actions></div></article>`;for(const item of actions){const b=document.createElement("button");b.className=`menu-button ${item.primary?"menu-button--primary":""}`;b.textContent=item.label;b.addEventListener("click",item.action);this.overlay.querySelector("[data-actions]").appendChild(b);}document.body.appendChild(this.overlay);}
-    hideOverlay(){this.overlay?.remove();this.overlay=null;}
-    endMatch(result){if(this.ended)return;this.ended=true;document.exitPointerLock?.();const win=["ESCAPED","TEAM_ESCAPED","PURSUER_WIN"].includes(result);const title=result.replaceAll("_"," ");this.showOverlay(title,win?"The match objective was completed.":"The facility claimed another match.",[{label:"RETRY",primary:true,action:()=>{this.stop();this.onRetry?.();}},{label:"BACK TO MENU",action:()=>{this.stop();this.onExit?.();}}]);}
+    setPaused(value) {
+        if (this.ended) return;
+        this.paused = value;
+        if (!value) return;
+        document.exitPointerLock?.();
+        this.showOverlay("PAUSED", "The match is waiting.", [
+            { label: "RESUME", primary: true, action: () => { this.hideOverlay(); this.paused = false; if (!this.isTouch) this.renderer.domElement.requestPointerLock?.(); } },
+            { label: "BACK TO MENU", action: () => { this.stop(); this.onExit?.(); } }
+        ]);
+    }
 
-    update(dt) {
-        this.updatePlayer(dt);
-        this.updateEscapeeNPCs(dt);
-        this.updatePursuerNPCs(dt);
-        this.updateCharacterAnimations(dt);
-        this.updateInteraction(dt);
-        this.updateMatch(dt);
+    showOverlay(title, message, actions) {
+        this.hideOverlay();
+        this.overlay = document.createElement("section");
+        this.overlay.className = "overlay";
+        this.overlay.innerHTML = `<article class="overlay-card"><p class="eyebrow">RUN FOR LIVE</p><h2>${title}</h2><p>${message}</p><div class="menu-actions" data-actions></div></article>`;
+        for (const item of actions) {
+            const button = document.createElement("button");
+            button.className = `menu-button ${item.primary ? "menu-button--primary" : ""}`;
+            button.textContent = item.label;
+            button.addEventListener("click", item.action);
+            this.overlay.querySelector("[data-actions]").appendChild(button);
+        }
+        document.body.appendChild(this.overlay);
+    }
+
+    hideOverlay() { this.overlay?.remove(); this.overlay = null; }
+    endMatch(result) {
+        if (this.ended) return;
+        this.ended = true;
+        document.exitPointerLock?.();
+        this.showOverlay(result, "The match has ended.", [
+            { label: "RETRY", primary: true, action: () => { this.stop(); this.onRetry?.(); } },
+            { label: "BACK TO MENU", action: () => { this.stop(); this.onExit?.(); } }
+        ]);
+    }
+
+    update(deltaTime) {
+        this.updatePlayer(deltaTime);
+        this.updateEscapeeNPCs(deltaTime);
+        this.updatePursuerNPCs(deltaTime);
+        this.updateCharacterAnimations(deltaTime);
+        this.updateInteraction(deltaTime);
+        this.updateMatch(deltaTime);
         this.updateHUD();
     }
-    animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.update(dt);this.renderer.render(this.scene,this.camera);}
-    resize(){if(!this.camera||!this.renderer)return;const w=Math.max(this.container.clientWidth,1),h=Math.max(this.container.clientHeight,1);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.renderer.setSize(w,h,false);}
 
-    stop(){if(!this.running)return;this.running=false;cancelAnimationFrame(this.frame);removeEventListener("resize",this.resize);removeEventListener("keydown",this.keyDown);removeEventListener("keyup",this.keyUp);removeEventListener("mousemove",this.mouseMove);document.removeEventListener("pointerlockchange",this.pointerLockChange);document.exitPointerLock?.();this.clock.stop();this.hud?.remove();this.touchRoot?.remove();this.overlay?.remove();this.renderer?.dispose();this.renderer?.domElement.remove();this.scene=null;this.camera=null;this.renderer=null;}
+    animate() {
+        if (!this.running) return;
+        this.frame = requestAnimationFrame(this.animate);
+        const deltaTime = Math.min(this.clock.getDelta(), 0.05);
+        this.update(deltaTime);
+        this.renderer.render(this.scene, this.camera);
+    }
+
+    resize() {
+        if (!this.camera || !this.renderer) return;
+        const width = Math.max(this.container.clientWidth, 1);
+        const height = Math.max(this.container.clientHeight, 1);
+        this.camera.aspect = width / height;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(width, height, false);
+    }
+
+    stop() {
+        if (!this.running) return;
+        this.running = false;
+        cancelAnimationFrame(this.frame);
+        removeEventListener("resize", this.resize);
+        removeEventListener("keydown", this.keyDown);
+        removeEventListener("keyup", this.keyUp);
+        removeEventListener("mousemove", this.mouseMove);
+        document.removeEventListener("pointerlockchange", this.pointerLockChange);
+        document.exitPointerLock?.();
+        this.clock.stop();
+        this.hud?.remove();
+        this.touchRoot?.remove();
+        this.overlay?.remove();
+        this.renderer?.dispose();
+        this.renderer?.domElement.remove();
+    }
 }
