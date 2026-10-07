@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { createEscapee, createPursuer, CharacterAnimator } from "./characters.js";
 
 const MATCH_TIME = 600;
 const PLAYER_HEIGHT = 1.72;
@@ -148,14 +149,27 @@ export class Game {
     }
 
     createCharacter(type, x, z, color, player = false) {
-        const root = new THREE.Group(); root.position.set(x,0,z); root.userData = { type, player, state:"IDLE", target:null, captured:false, escaped:false, health:2, cooldown:0 };
-        const body = new THREE.Mesh(new THREE.CapsuleGeometry(.55,1.35,6,10), material(color)); body.position.y = 1.35;
-        const head = new THREE.Mesh(new THREE.SphereGeometry(.42,14,10), material(type === "PURSUER" ? 0x111416 : 0xc8a789)); head.position.y = 2.65;
-        root.add(body, head);
-        if (type === "PURSUER") {
-            const eye = new THREE.PointLight(0xff2222,2.5,8,2); eye.position.set(0,2.7,-.35); root.add(eye);
-        }
-        this.scene.add(root); return root;
+        const root = type === "PURSUER"
+            ? createPursuer()
+            : createEscapee({
+                jacketColor: color,
+                accentColor: new THREE.Color(color).offsetHSL(0, 0.08, 0.18).getHex()
+            });
+
+        root.position.set(x, 0, z);
+        root.userData.type = type;
+        root.userData.player = player;
+        root.userData.state = "IDLE";
+        root.userData.target = null;
+        root.userData.captured = false;
+        root.userData.escaped = false;
+        root.userData.health = 2;
+        root.userData.cooldown = 0;
+        root.userData.speed = 0;
+        root.userData.animator = new CharacterAnimator(root);
+
+        this.scene.add(root);
+        return root;
     }
 
     createCharacters() {
@@ -267,7 +281,48 @@ export class Game {
     getNearestPursuer(position){return this.pursuers.sort((a,b)=>distanceXZ(position,a.position)-distanceXZ(position,b.position))[0]||null;}
     getNearestActiveEscapee(position,includePlayer){const list=this.escapees.filter(n=>!n.userData.captured&&!n.userData.escaped); if(includePlayer&&this.role==="ESCAPEE")list.push(this.camera); return list.sort((a,b)=>distanceXZ(position,a.position)-distanceXZ(position,b.position))[0]||null;}
     moveNPCToward(npc,target,speed,dt){const dir=target.clone().sub(npc.position).setY(0);if(dir.lengthSq()<.01)return;dir.normalize();this.moveNPC(npc,dir,speed,dt);}
-    moveNPC(npc,dir,speed,dt){const nx=npc.position.x+dir.x*speed*dt,nz=npc.position.z+dir.z*speed*dt;if(!this.collides(nx,npc.position.z))npc.position.x=nx;if(!this.collides(npc.position.x,nz))npc.position.z=nz;npc.rotation.y=Math.atan2(dir.x,dir.z);}
+    moveNPC(npc, dir, speed, dt) {
+        const nx = npc.position.x + dir.x * speed * dt;
+        const nz = npc.position.z + dir.z * speed * dt;
+        let moved = false;
+
+        if (!this.collides(nx, npc.position.z)) {
+            npc.position.x = nx;
+            moved = true;
+        }
+
+        if (!this.collides(npc.position.x, nz)) {
+            npc.position.z = nz;
+            moved = true;
+        }
+
+        npc.rotation.y = Math.atan2(dir.x, dir.z);
+        npc.userData.speed = moved ? speed : 0;
+    }
+
+    updateCharacterAnimations(deltaTime) {
+        for (const character of [...this.escapees, ...this.pursuers]) {
+            if (!character.visible) continue;
+
+            let animationState = character.userData.state || "IDLE";
+
+            if (character.userData.captured) {
+                animationState = "DOWNED";
+            } else if (animationState === "SEARCH") {
+                animationState = "WALK";
+            } else if (animationState === "PATROL") {
+                animationState = "WALK";
+            } else if (animationState === "ESCAPE") {
+                animationState = "RUN";
+            }
+
+            character.userData.animator?.update(deltaTime, {
+                state: animationState,
+                speed: character.userData.speed || 0,
+                injured: character.userData.health === 1
+            });
+        }
+    }
 
     updateInteraction(dt) {
         if(this.paused||this.ended)return;
@@ -305,7 +360,15 @@ export class Game {
     hideOverlay(){this.overlay?.remove();this.overlay=null;}
     endMatch(result){if(this.ended)return;this.ended=true;document.exitPointerLock?.();const win=["ESCAPED","TEAM_ESCAPED","PURSUER_WIN"].includes(result);const title=result.replaceAll("_"," ");this.showOverlay(title,win?"The match objective was completed.":"The facility claimed another match.",[{label:"RETRY",primary:true,action:()=>{this.stop();this.onRetry?.();}},{label:"BACK TO MENU",action:()=>{this.stop();this.onExit?.();}}]);}
 
-    update(dt){this.updatePlayer(dt);this.updateEscapeeNPCs(dt);this.updatePursuerNPCs(dt);this.updateInteraction(dt);this.updateMatch(dt);this.updateHUD();}
+    update(dt) {
+        this.updatePlayer(dt);
+        this.updateEscapeeNPCs(dt);
+        this.updatePursuerNPCs(dt);
+        this.updateCharacterAnimations(dt);
+        this.updateInteraction(dt);
+        this.updateMatch(dt);
+        this.updateHUD();
+    }
     animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.update(dt);this.renderer.render(this.scene,this.camera);}
     resize(){if(!this.camera||!this.renderer)return;const w=Math.max(this.container.clientWidth,1),h=Math.max(this.container.clientHeight,1);this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.renderer.setSize(w,h,false);}
 
