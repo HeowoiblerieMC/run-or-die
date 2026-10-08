@@ -30,7 +30,7 @@ export class Game{
     this.playerPosition=new THREE.Vector3();this.playerModel=null;this.playerAnimator=null;
     this.cameraModeIndex=0;this.cameraMode=CAMERA_MODES[0];this.cameraRay=new THREE.Raycaster();
     this.yaw=0;this.pitch=0;this.elapsed=0;this.stamina=100;this.repaired=0;this.repairProgress=0;
-    this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.chatMessages=[];this.chatMaximum=10;
+    this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.playerHealth=3;this.lastSafePlayerPosition=new THREE.Vector3();this.chatMessages=[];this.chatMaximum=10;
     this.touch={sprint:false,sneak:false,interact:false};this.joystick={x:0,y:0,pointer:null};this.dragPointer=null;
     this.animate=this.animate.bind(this);this.keyDown=this.keyDown.bind(this);this.keyUp=this.keyUp.bind(this);this.mouseMove=this.mouseMove.bind(this);this.resize=this.resize.bind(this);
   }
@@ -165,6 +165,14 @@ export class Game{
     this.addRoom(-24,12,20,20,['N','S','E','W']);this.addRoom(24,12,20,20,['N','S','E','W']);
     this.addMonitorDesk(-24,12);this.addMonitorDesk(24,12);
     [[-38,52],[-18,52],[18,52],[38,52]].forEach(([x,z])=>this.addFurniture('HubBench',[7,.7,1.6],[x,.55,z],0x59666c,true));
+
+    // Architectural details: door frames, ceiling lights, cabinets, chairs and wall panels.
+    const doorFrames=[[-99,-96,0],[-99,-58,0],[-99,58,0],[-99,90,0],[-99,120,0],[-41,-112,0],[46,-112,0],[99,-91,0],[99,-51,0],[95,69,0],[95,112,0]];
+    doorFrames.forEach(([x,z,r])=>{const left=this.addFurniture('DoorFrame',[.35,4,.35],[x-1.9,2,z],0x69777e,false,{metalness:.55});const right=this.addFurniture('DoorFrame',[.35,4,.35],[x+1.9,2,z],0x69777e,false,{metalness:.55});const top=this.addFurniture('DoorFrame',[4.15,.35,.35],[x,3.85,z],0x69777e,false,{metalness:.55});left.rotation.y=right.rotation.y=top.rotation.y=r});
+    const lights=[[-116,-96],[-116,-58],[-116,58],[-116,90],[-116,120],[-65,-112],[25,-112],[116,-91],[116,-51],[114,69],[114,112],[-24,12],[24,12],[0,52]];
+    lights.forEach(([x,z],index)=>{const panel=this.addFurniture('CeilingLight',[4.8,.12,1.1],[x,3.85,z],0xddeaf0,false,{emissive:index%3===0?0xff3333:0x9de7ff,emissiveIntensity:index%3===0?.7:1.2});});
+    [[-123,-88],[-113,-88],[-123,80],[-113,80],[104,-86],[118,-86],[-55,-96],[-72,-96],[18,-104],[35,-104]].forEach(([x,z])=>this.addFurniture('Chair',[1,.9,1],[x,.55,z],0x2f3a40,true));
+    [[-130,-105],[-130,-55],[-130,110],[-100,110],[131,-94],[131,-54],[132,108]].forEach(([x,z])=>this.addFurniture('Cabinet',[2.2,3.5,1.25],[x,1.75,z],0x4b575e,true,{metalness:.28}));
   }
 
   createObjectives(){
@@ -177,7 +185,7 @@ export class Game{
     [['TUNNEL',-42,126,0x57cfff],['ROOFTOP',0,126,0xa8e85c],['CARGO',42,126,0xff9f32]].forEach(([name,x,z,color])=>{const route=new THREE.Group();route.position.set(x,0,z);route.add(box(name,[13,.3,12],[0,.15,0],color,mat(color,{emissive:color,emissiveIntensity:.45})));route.userData={name,active:false};this.scene.add(route);this.finalRoutes.push(route)});
   }
 
-  createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c)});this.scene.add(c);return c}
+  createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c),nextAttackAt:0,lastSafePosition:new THREE.Vector3(x,0,z),noMoveTime:0});this.scene.add(c);return c}
   isSpawnClear(position,radius=2.4){
     if(this.collision(position.x,position.z,radius))return false;
     return [...this.escapees,...this.pursuers].every(npc=>distanceXZ(position,npc.position)>radius*2.2);
@@ -195,10 +203,31 @@ export class Game{
     return new THREE.Vector3(0,0,24);
   }
 
-  rescueStuckEntity(entity,radius=1.1){
-    if(!this.collision(entity.position.x,entity.position.z,radius))return;
-    const safe=this.findSafeSpawn([[0,24],[-70,20],[70,20],[0,62],[-32,104],[68,104],[-72,-70],[68,-72]],radius+1);
-    entity.position.copy(safe);
+  rememberSafePosition(entity,radius=.72){
+    if(!this.collision(entity.position.x,entity.position.z,radius)){
+      entity.userData.lastSafePosition=entity.position.clone();
+    }
+  }
+
+  updateStuckRecovery(dt){
+    const entities=[...this.escapees,...this.pursuers];
+    for(const entity of entities){
+      if(entity.userData.captured||entity.userData.escaped)continue;
+      const current=entity.position;
+      const previous=entity.userData.previousRecoveryPosition||current.clone();
+      const moved=distanceXZ(current,previous);
+      entity.userData.previousRecoveryPosition=current.clone();
+      const wantsMove=entity.userData.state!=="IDLE";
+      entity.userData.noMoveTime=wantsMove&&moved<.012?(entity.userData.noMoveTime||0)+dt:0;
+      this.rememberSafePosition(entity,entity.userData.type==='PURSUER'?1:.75);
+      if(entity.userData.noMoveTime>3.5){
+        const safe=entity.userData.lastSafePosition;
+        if(safe&&!this.collision(safe.x,safe.z,1)){entity.position.copy(safe)}
+        else entity.position.copy(this.findSafeSpawn([[0,24],[-70,20],[70,20],[0,62],[-32,104],[68,104]],2));
+        entity.userData.noMoveTime=0;
+      }
+    }
+    if(!this.collision(this.playerPosition.x,this.playerPosition.z,.65))this.lastSafePlayerPosition.copy(this.playerPosition);
   }
 
   createCharacters(){
@@ -213,7 +242,7 @@ export class Game{
     const pursuerNpcCount=this.role==='PURSUER'?9:10;
     const playerCandidates=this.role==='ESCAPEE'?[[0,24],[-34,24],[34,24],[0,62]]:[[-126,-126],[126,-126],[-126,126],[126,126]];
     const playerSpawn=this.findSafeSpawn(playerCandidates,2.8);
-    this.playerPosition.copy(playerSpawn);this.yaw=this.role==='ESCAPEE'?Math.PI:Math.PI/2;
+    this.playerPosition.copy(playerSpawn);this.lastSafePlayerPosition.copy(playerSpawn);this.yaw=this.role==='ESCAPEE'?Math.PI:Math.PI/2;
     this.playerModel=this.role==='ESCAPEE'?createEscapee({jacketColor:0xd59a43}):createPursuer();
     for(let i=0;i<escapeeCount;i+=1){
       const data=pool[i],preferred=walkable.slice(i).concat(walkable.slice(0,i));
@@ -222,7 +251,7 @@ export class Game{
       npc.userData.entityId=data.id;
       this.escapees.push(npc);
     }
-    const hunterCandidates=[[-128,-128],[128,-128],[-128,128],[128,128],[0,-128],[-128,0],[128,0],[0,128],[-68,-125],[68,-125],[-68,125],[68,125],[-125,-68],[125,-68],[-125,68],[125,68]];
+    const hunterCandidates=[[-72,-70],[68,-72],[-70,20],[70,20],[-32,104],[68,104],[-120,20],[112,10],[0,-108],[0,92],[-78,-92],[78,-92],[-96,104],[104,104]];
     for(let i=0;i<pursuerNpcCount;i+=1){
       const ordered=hunterCandidates.slice(i).concat(hunterCandidates.slice(0,i));
       const spawn=this.findSafeSpawn(ordered,3.1);
@@ -234,8 +263,8 @@ export class Game{
   }
 
   createHud(){
-    this.hud=document.createElement("div");this.hud.className="game-hud";this.hud.innerHTML=`<div class="hud-stack"><div class="hud-panel"><div class="hud-title">RUN FOR LIVE</div><div class="hud-row"><span>ROLE</span><strong>${this.role}</strong></div><div class="hud-row"><span>VIEW</span><strong data-view>FIRST</strong></div><div class="hud-row"><span>TIME</span><strong data-time>10:00</strong></div><div class="hud-row"><span>TERMINALS</span><strong data-terminals>0 / 3</strong></div><div class="hud-row"><span>CAPTURED</span><strong data-captured>0 / 4</strong></div><div class="hud-row"><span>ESCAPEES</span><strong data-active>4 ACTIVE</strong></div><div class="hud-row"><span>STAMINA</span><strong data-stamina>100%</strong></div></div></div><div class="crosshair"></div><div class="center-prompt" data-prompt></div><div class="view-toast" data-view-toast>FIRST PERSON</div>`;document.body.appendChild(this.hud);
-    this.ui={view:this.hud.querySelector("[data-view]"),time:this.hud.querySelector("[data-time]"),terminals:this.hud.querySelector("[data-terminals]"),captured:this.hud.querySelector("[data-captured]"),active:this.hud.querySelector("[data-active]"),stamina:this.hud.querySelector("[data-stamina]"),prompt:this.hud.querySelector("[data-prompt]"),viewToast:this.hud.querySelector("[data-view-toast]")};
+    this.hud=document.createElement("div");this.hud.className="game-hud";this.hud.innerHTML=`<div class="hud-stack"><div class="hud-panel"><div class="hud-title">RUN FOR LIVE</div><div class="hud-row"><span>ROLE</span><strong>${this.role}</strong></div><div class="hud-row"><span>VIEW</span><strong data-view>FIRST</strong></div><div class="hud-row"><span>TIME</span><strong data-time>10:00</strong></div><div class="hud-row"><span>TERMINALS</span><strong data-terminals>0 / 3</strong></div><div class="hud-row"><span>CAPTURED</span><strong data-captured>0 / 4</strong></div><div class="hud-row"><span>ESCAPEES</span><strong data-active>4 ACTIVE</strong></div><div class="hud-row"><span>HEALTH</span><strong data-health>3 / 3</strong></div><div class="hud-row"><span>STAMINA</span><strong data-stamina>100%</strong></div></div></div><div class="crosshair"></div><div class="center-prompt" data-prompt></div><div class="view-toast" data-view-toast>FIRST PERSON</div>`;document.body.appendChild(this.hud);
+    this.ui={view:this.hud.querySelector("[data-view]"),time:this.hud.querySelector("[data-time]"),terminals:this.hud.querySelector("[data-terminals]"),captured:this.hud.querySelector("[data-captured]"),active:this.hud.querySelector("[data-active]"),health:this.hud.querySelector("[data-health]"),stamina:this.hud.querySelector("[data-stamina]"),prompt:this.hud.querySelector("[data-prompt]"),viewToast:this.hud.querySelector("[data-view-toast]")};
   }
 
   createGameChat(){
@@ -289,7 +318,42 @@ export class Game{
   setNpcState(npc,state){if(npc.userData.state===state)return;npc.userData.state=state;if(state==="FLEE")this.addNpcMessage(npc,"flee","The pursuer is here!");else if(state==="REPAIR")this.addNpcMessage(npc,"repair","Repairing a terminal.");else if(state==="ESCAPE")this.addNpcMessage(npc,"exit","The exit is open. Move!");else if(state==="CHASE"&&npc.userData.type==="PURSUER")this.addNpcMessage(npc,"chase","I found you.")}
   selectTerminalForNpc(npc){if(npc.userData.targetTerminal&&!npc.userData.targetTerminal.userData.repaired)return npc.userData.targetTerminal;const available=this.terminals.filter(t=>!t.userData.repaired).sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position)),terminal=available.find(t=>!t.userData.assignedNpcId||t.userData.assignedNpcId===npc.userData.entityId)||available[0];if(terminal){terminal.userData.assignedNpcId=npc.userData.entityId;npc.userData.targetTerminal=terminal}return terminal}
   updateEscapeeNpc(npc,dt){if(npc.userData.captured||npc.userData.escaped)return;const pursuer=this.role==="PURSUER"?{position:this.playerPosition}:this.pursuers[0],danger=pursuer?distanceXZ(npc.position,pursuer.position):Infinity;if(danger<13){this.setNpcState(npc,"FLEE");const away=npc.position.clone().sub(pursuer.position).setY(0);if(away.lengthSq()<.01)away.set(1,0,0);this.moveNpc(npc,npc.position.clone().add(away.normalize().multiplyScalar(12)),4.9,dt)}else if(this.repaired>=REQUIRED_TERMINALS){this.setNpcState(npc,"ESCAPE");this.moveNpc(npc,this.exitGate.position,3.9,dt);if(distanceXZ(npc.position,this.exitGate.position)<2){npc.userData.escaped=true;npc.visible=false;this.addSystemMessage(`${npc.userData.name} escaped.`)}}else{const terminal=this.selectTerminalForNpc(npc);if(!terminal)this.setNpcState(npc,"IDLE");else if(distanceXZ(npc.position,terminal.position)>2.1){this.setNpcState(npc,"WALK");this.moveNpc(npc,terminal.position,2.8,dt)}else{this.setNpcState(npc,"REPAIR");terminal.userData.progress+=dt/REPAIR_TIME*.55;if(terminal.userData.progress>=1)this.completeTerminal(terminal,npc)}}npc.userData.animator.update(dt,{state:npc.userData.state,injured:npc.userData.health===1})}
-  updatePursuerNpc(npc,dt){const candidates=[{isPlayer:true,position:this.playerPosition},...this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).map(e=>({isPlayer:false,entity:e,position:e.position}))];if(!candidates.length)return;candidates.sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position));const target=candidates[Math.min(npc.userData.patrolIndex||0,candidates.length-1)],d=distanceXZ(npc.position,target.position);this.setNpcState(npc,d<24?"CHASE":"WALK");this.moveNpc(npc,target.position,d<24?4.7:2.4,dt);npc.userData.animator.update(dt,{state:npc.userData.state});if(d<1.25){if(target.isPlayer){this.addNpcMessage(npc,"caught","You're coming with me.",true);this.end("CAUGHT")}else{target.entity.userData.health-=1;if(target.entity.userData.health<=0)this.captureEscapee(target.entity);else target.entity.position.addScaledVector(target.entity.position.clone().sub(npc.position).setY(0).normalize(),3)}}}
+  updatePursuerNpc(npc,dt){
+    const candidates=[
+      ...(this.role==='ESCAPEE'?[{isPlayer:true,position:this.playerPosition}]:[]),
+      ...this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).map(e=>({isPlayer:false,entity:e,position:e.position}))
+    ];
+    if(!candidates.length)return;
+    candidates.sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position));
+    const spreadIndex=(npc.userData.patrolIndex||0)%Math.min(candidates.length,5);
+    let target=candidates[spreadIndex];
+    if(distanceXZ(npc.position,candidates[0].position)<12)target=candidates[0];
+    const d=distanceXZ(npc.position,target.position);
+    this.setNpcState(npc,d<38?'CHASE':'WALK');
+    this.moveNpc(npc,target.position,d<38?5.6:3.2,dt);
+    npc.userData.animator.update(dt,{state:npc.userData.state});
+    const now=performance.now();
+    if(d<1.9&&now>=npc.userData.nextAttackAt){
+      npc.userData.nextAttackAt=now+1250;
+      npc.userData.animator.update(dt,{state:'CHASE'});
+      this.addNpcMessage(npc,`attack-${Math.floor(now/5000)}`,'Target acquired.',true);
+      if(target.isPlayer){
+        this.playerHealth-=1;
+        this.addSystemMessage(`Warden hit you. Health: ${Math.max(0,this.playerHealth)}/3`);
+        const push=this.playerPosition.clone().sub(npc.position).setY(0);
+        if(push.lengthSq()>.01){push.normalize();const nx=this.playerPosition.x+push.x*2.4,nz=this.playerPosition.z+push.z*2.4;if(!this.collision(nx,nz,.65)){this.playerPosition.set(nx,0,nz)}}
+        if(this.playerHealth<=0)this.end('CAUGHT');
+      }else if(target.entity){
+        target.entity.userData.health-=1;
+        if(target.entity.userData.health<=0)this.captureEscapee(target.entity);
+        else{
+          const push=target.entity.position.clone().sub(npc.position).setY(0).normalize();
+          const nx=target.entity.position.x+push.x*2.2,nz=target.entity.position.z+push.z*2.2;
+          if(!this.collision(nx,nz,.75))target.entity.position.set(nx,0,nz);
+        }
+      }
+    }
+  }
   updateNpcs(dt){this.escapees.forEach(e=>this.updateEscapeeNpc(e,dt));if(this.role==="ESCAPEE")this.pursuers.forEach(p=>this.updatePursuerNpc(p,dt))}
   completeTerminal(terminal,npc=null){if(terminal.userData.repaired)return;terminal.userData.repaired=true;terminal.userData.progress=1;terminal.userData.screenMaterial.color.set(0x1f7848);terminal.userData.screenMaterial.emissive.set(0x29ff82);terminal.userData.assignedNpcId=null;this.repaired+=1;if(npc)this.addNpcMessage(npc,`terminal-${this.repaired}`,"Terminal restored!",true);this.escapees.forEach(e=>{if(e.userData.targetTerminal===terminal)e.userData.targetTerminal=null});if(this.repaired>=REQUIRED_TERMINALS){this.exitGate.userData.open=true;this.exitGate.userData.door.visible=false;this.addSystemMessage("All codes accepted. The final gate is open. Choose one of three routes.")}}
   nearestClue(){return this.clues.filter(c=>!c.userData.found).sort((a,b)=>distanceXZ(this.playerPosition,a.position)-distanceXZ(this.playerPosition,b.position))[0]||null}
@@ -307,9 +371,9 @@ export class Game{
   checkMatchEnd(){if(this.ended)return;const remaining=this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped),captured=this.escapees.filter(e=>e.userData.captured).length;if(this.role==="PURSUER"&&remaining.length===0)this.end(captured===this.escapees.length?"PURSUER WIN":"MATCH OVER")}
   calculateReward(result){let reward=25;if(this.role==="ESCAPEE"){reward+=this.repaired*100;if(result==="ESCAPED")reward+=400}else{reward+=this.escapees.filter(e=>e.userData.captured).length*150;if(result==="PURSUER WIN")reward+=500}return Math.max(0,Math.floor(reward))}
   grantMatchReward(result){if(this.rewardGranted||this.profile.role==="GUEST")return 0;this.rewardGranted=true;const reward=this.calculateReward(result);if(reward>0){addCoins(this.profile,reward);this.onCoinsChanged?.({profile:this.profile,amount:reward,result})}return reward}
-  updateHud(){const remaining=Math.max(0,MATCH_TIME-this.elapsed);this.ui.time.textContent=`${String(Math.floor(remaining/60)).padStart(2,"0")}:${String(Math.floor(remaining%60)).padStart(2,"0")}`;this.ui.terminals.textContent=`${this.repaired} / ${REQUIRED_TERMINALS}`;const captured=this.escapees.filter(e=>e.userData.captured).length,active=this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).length;this.ui.captured.textContent=`${captured} / ${this.escapees.length}`;this.ui.active.textContent=`${active+(this.role==="ESCAPEE"?1:0)} ACTIVE`;this.ui.stamina.textContent=`${Math.round(this.stamina)}%`}
+  updateHud(){const remaining=Math.max(0,MATCH_TIME-this.elapsed);this.ui.time.textContent=`${String(Math.floor(remaining/60)).padStart(2,"0")}:${String(Math.floor(remaining%60)).padStart(2,"0")}`;this.ui.terminals.textContent=`${this.repaired} / ${REQUIRED_TERMINALS}`;const captured=this.escapees.filter(e=>e.userData.captured).length,active=this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).length;this.ui.captured.textContent=`${captured} / ${this.escapees.length}`;this.ui.active.textContent=`${active+(this.role==="ESCAPEE"?1:0)} ACTIVE`;this.ui.health.textContent=`${Math.max(0,this.playerHealth)} / 3`;this.ui.stamina.textContent=`${Math.round(this.stamina)}%`}
   end(title){if(this.ended)return;this.ended=true;this.running=false;this.closeChat(false);document.exitPointerLock?.();const reward=this.grantMatchReward(title),overlay=document.createElement("section");overlay.className="overlay";overlay.innerHTML=`<article class="overlay-card"><h2>${title}</h2>${reward>0?`<p class="match-reward">+${reward.toLocaleString()} Coins</p>`:""}<div class="menu-actions"><button class="menu-button menu-button--primary" data-retry>RETRY</button><button class="menu-button" data-menu>MENU</button></div></article>`;document.body.appendChild(overlay);overlay.querySelector("[data-retry]").onclick=()=>{this.stop();this.onRetry?.()};overlay.querySelector("[data-menu]").onclick=()=>{this.stop();this.onExit?.()};this.overlay=overlay}
-  animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.elapsed+=dt;this.updatePlayer(dt);this.updateNpcs(dt);this.updateObjectives(dt);this.updateCamera();this.updateHud();this.checkMatchEnd();this.rescueStuckEntity({position:this.playerPosition},.7);this.escapees.forEach(entity=>this.rescueStuckEntity(entity,.75));this.pursuers.forEach(entity=>this.rescueStuckEntity(entity,1));if(this.elapsed>=MATCH_TIME)this.end(this.role==="PURSUER"?"PURSUER WIN":"TIME EXPIRED");this.renderer.render(this.scene,this.camera)}
+  animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.elapsed+=dt;this.updatePlayer(dt);this.updateNpcs(dt);this.updateObjectives(dt);this.updateCamera();this.updateHud();this.checkMatchEnd();this.updateStuckRecovery(dt);if(this.elapsed>=MATCH_TIME)this.end(this.role==="PURSUER"?"PURSUER WIN":"TIME EXPIRED");this.renderer.render(this.scene,this.camera)}
   resize(){this.camera.aspect=this.container.clientWidth/this.container.clientHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false)}
   stop(){this.running=false;cancelAnimationFrame(this.frame);clearTimeout(this.viewToastTimer);removeEventListener("keydown",this.keyDown);removeEventListener("keyup",this.keyUp);removeEventListener("mousemove",this.mouseMove);removeEventListener("resize",this.resize);this.hud?.remove();this.chatRoot?.remove();this.touchRoot?.remove();this.overlay?.remove();this.renderer?.dispose();this.renderer?.domElement.remove()}
 }
