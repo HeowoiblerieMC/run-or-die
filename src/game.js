@@ -30,7 +30,7 @@ export class Game{
     this.playerPosition=new THREE.Vector3();this.playerModel=null;this.playerAnimator=null;
     this.cameraModeIndex=0;this.cameraMode=CAMERA_MODES[0];this.cameraRay=new THREE.Raycaster();
     this.yaw=0;this.pitch=0;this.elapsed=0;this.stamina=100;this.repaired=0;this.repairProgress=0;
-    this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.playerHealth=3;this.lastSafePlayerPosition=new THREE.Vector3();this.chatMessages=[];this.chatMaximum=10;
+    this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.playerHealth=3;this.lastTeamReplyAt=0;this.lastSafePlayerPosition=new THREE.Vector3();this.chatMessages=[];this.chatMaximum=10;
     this.touch={sprint:false,sneak:false,interact:false};this.joystick={x:0,y:0,pointer:null};this.dragPointer=null;
     this.animate=this.animate.bind(this);this.keyDown=this.keyDown.bind(this);this.keyUp=this.keyUp.bind(this);this.mouseMove=this.mouseMove.bind(this);this.resize=this.resize.bind(this);
   }
@@ -41,7 +41,7 @@ export class Game{
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false);this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.container.appendChild(this.renderer.domElement);
     this.clock=new THREE.Clock();this.createLighting();this.createFacility();this.createInteriors();this.createObjectives();this.createCharacters();this.createHud();this.createGameChat();this.createTouchControls();this.bindEvents();this.updateCamera();
-    this.addSystemMessage(this.role==="PURSUER"?"Capture all four escapees.":"Restore three terminals and reach the exit.");
+    this.addSystemMessage(this.role==="PURSUER"?"Coordinate with five Wardens and capture all escapees.":"Your team starts in the north safe zone. Six Wardens begin in the south sector.");
     this.running=true;this.clock.start();this.animate();
   }
 
@@ -237,10 +237,10 @@ export class Game{
       color:new THREE.Color().setHSL((i*.61803398875)%1,.55,.52).getHex()
     }));
     for(let i=pool.length-1;i>0;i-=1){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
-    const walkable=[[-72,-70],[-52,-52],[-22,-52],[18,-60],[68,-72],[112,-118],[-122,20],[-70,20],[-34,24],[12,24],[56,20],[112,10],[-120,105],[-74,104],[-32,104],[18,104],[68,104],[112,98],[0,62],[45,68]];
+    const walkable=[[0,86],[-18,86],[18,86],[-36,86],[36,86],[-54,86],[54,86],[-72,104],[-48,104],[-24,104],[0,104],[24,104],[48,104],[72,104],[-118,104],[-92,104],[92,104],[118,104],[-70,52],[70,52]];
     const escapeeCount=this.role==='ESCAPEE'?14:15;
-    const pursuerNpcCount=this.role==='PURSUER'?9:10;
-    const playerCandidates=this.role==='ESCAPEE'?[[0,24],[-34,24],[34,24],[0,62]]:[[-126,-126],[126,-126],[-126,126],[126,126]];
+    const pursuerNpcCount=this.role==='PURSUER'?5:6;
+    const playerCandidates=this.role==='ESCAPEE'?[[0,86],[-18,86],[18,86],[0,100]]:[[0,-126],[-18,-126],[18,-126],[-36,-126],[36,-126]];
     const playerSpawn=this.findSafeSpawn(playerCandidates,2.8);
     this.playerPosition.copy(playerSpawn);this.lastSafePlayerPosition.copy(playerSpawn);this.yaw=this.role==='ESCAPEE'?Math.PI:Math.PI/2;
     this.playerModel=this.role==='ESCAPEE'?createEscapee({jacketColor:0xd59a43}):createPursuer();
@@ -251,7 +251,7 @@ export class Game{
       npc.userData.entityId=data.id;
       this.escapees.push(npc);
     }
-    const hunterCandidates=[[-72,-70],[68,-72],[-70,20],[70,20],[-32,104],[68,104],[-120,20],[112,10],[0,-108],[0,92],[-78,-92],[78,-92],[-96,104],[104,104]];
+    const hunterCandidates=[[0,-126],[-24,-126],[24,-126],[-48,-126],[48,-126],[-72,-126],[72,-126],[-120,-20],[120,-20],[-90,-88],[90,-88]];
     for(let i=0;i<pursuerNpcCount;i+=1){
       const ordered=hunterCandidates.slice(i).concat(hunterCandidates.slice(0,i));
       const spawn=this.findSafeSpawn(ordered,3.1);
@@ -283,11 +283,56 @@ export class Game{
     const content=this.chatInput.value.trim().slice(0,120);if(!content){this.closeChat(true);return}
     const coin=/^\/(?:coin\s+give|give\s+coin)\s+/i.test(content),gift=/^\/gift\s+/i.test(content);
     if(coin||gift){
-      try{const result=coin?executeAdminCoinCommand({executor:this.profile,command:content,profiles:this.getCommandProfiles()}):executeGiftCommand({sender:this.profile,command:content,profiles:this.getCommandProfiles()});this.addSystemMessage(result.message);this.onCoinsChanged?.(result)}catch(error){this.addSystemMessage(error?.message||String(error))}
+      try{const result=coin?executeAdminCoinCommand({executor:this.profile,command:content,profiles:this.getCommandProfiles()}):executeGiftCommand({sender:this.profile,command:content,profiles:this.getCommandProfiles()});this.addSystemMessage(result.message);if(gift)this.thankForGift(result.target);this.onCoinsChanged?.(result)}catch(error){this.addSystemMessage(error?.message||String(error))}
       this.closeChat(true);return;
     }
     let identity;if(this.profile.role==="ADMIN")identity={label:"Admin",className:"admin"};else if(this.profile.role==="MODERATOR")identity={label:"Mod",className:"moderator"};else if(this.profile.role==="GUEST")identity={label:"Guest",className:"guest"};else{const selected=getSelectedRank(this.profile);identity={label:selected.label,className:selected.className}}
-    this.addChatMessage({...identity,displayName:this.profile.displayName,content});this.closeChat(true);
+    this.addChatMessage({...identity,displayName:this.profile.displayName,content});this.scheduleNpcReply(content);this.closeChat(true);
+  }
+
+  getNearbyEscapees(maximum=4){
+    return this.escapees
+      .filter(npc=>!npc.userData.captured&&!npc.userData.escaped)
+      .sort((a,b)=>distanceXZ(this.playerPosition,a.position)-distanceXZ(this.playerPosition,b.position))
+      .slice(0,maximum);
+  }
+
+  scheduleNpcReply(content){
+    if(this.role!=='ESCAPEE')return;
+    const now=performance.now();
+    if(now-this.lastTeamReplyAt<1800)return;
+    this.lastTeamReplyAt=now;
+    const lower=content.toLowerCase();
+    const nearby=this.getNearbyEscapees(6);
+    if(!nearby.length)return;
+    const direct=nearby.find(npc=>lower.includes(npc.userData.name.toLowerCase()));
+    const speaker=direct||nearby[Math.floor(Math.random()*nearby.length)];
+    let replies;
+    if(/plan|strategy|ä½æ¦|ã©ããã|what do we do/.test(lower)){
+      replies=['Split into teams. Two search Research, two cover Medical.','I will search for clues. Stay away from the central corridor.','Let us finish one terminal at a time and regroup at the hub.'];
+    }else if(/help|å©ã|ææ´|è¿½ãã/.test(lower)){
+      replies=['I am coming to your position.','Keep moving. I will draw the Wardens away.','Head to the nearest room. I will cover the corridor.'];
+    }else if(/terminal|code|clue|ãã³ã|ç«¯æ«|ã³ã¼ã/.test(lower)){
+      replies=['I will check the nearest clue location.','Share every digit you find. I am heading to a terminal.','Understood. I will search the Security and Medical wings.'];
+    }else if(/tunnel|rooftop|cargo|route|ã«ã¼ã|å±ä¸|è²¨ç©|ãã³ãã«/.test(lower)){
+      replies=['I vote for the tunnel. It has more cover.','Cargo is longer, but the containers give us cover.','Rooftop is risky. We should regroup before selecting it.'];
+    }else if(/thanks|thank you|ãããã¨ã/.test(lower)){
+      replies=['You are welcome.','No problem. Let us get out together.','Anytime. Stay safe.'];
+    }else if(/hello|hi|hey|ããã«ã¡ã¯|ãã/.test(lower)){
+      replies=['Hey. I am ready.','Hello. Let us find those clues.','I hear you. What is the plan?'];
+    }else{
+      replies=['Understood.','Copy that.','I hear you.','Stay together and keep moving.'];
+    }
+    const reply=replies[Math.floor(Math.random()*replies.length)];
+    setTimeout(()=>{if(this.running&&!speaker.userData.captured)this.addNpcMessage(speaker,`reply-${Date.now()}`,reply,true)},550+Math.random()*850);
+  }
+
+  thankForGift(target){
+    if(!target)return;
+    const npc=this.escapees.find(entity=>entity.userData.entityId===target.id||entity.userData.name.toLowerCase()===String(target.displayName||'').toLowerCase());
+    if(!npc)return;
+    const thanks=['Thank you! I will use it well.','That is amazing, thank you!','Thanks! I owe you one.','Thank you. I will help with the mission.'];
+    setTimeout(()=>this.addNpcMessage(npc,`gift-thanks-${Date.now()}`,thanks[Math.floor(Math.random()*thanks.length)],true),450);
   }
 
   addChatMessage(message){this.chatMessages.push(message);if(this.chatMessages.length>this.chatMaximum)this.chatMessages.shift();this.renderChat()}
