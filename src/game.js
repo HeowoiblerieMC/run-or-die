@@ -40,7 +40,7 @@ export class Game{
     this.camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.08,240);this.camera.rotation.order="YXZ";
     this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
     this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false);this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.container.appendChild(this.renderer.domElement);
-    this.clock=new THREE.Clock();this.createLighting();this.createFacility();this.createObjectives();this.createCharacters();this.createHud();this.createGameChat();this.createTouchControls();this.bindEvents();this.updateCamera();
+    this.clock=new THREE.Clock();this.createLighting();this.createFacility();this.createInteriors();this.createObjectives();this.createCharacters();this.createHud();this.createGameChat();this.createTouchControls();this.bindEvents();this.updateCamera();
     this.addSystemMessage(this.role==="PURSUER"?"Capture all four escapees.":"Restore three terminals and reach the exit.");
     this.running=true;this.clock.start();this.animate();
   }
@@ -57,6 +57,116 @@ export class Game{
     labels.forEach(([name,x,z,color])=>{const marker=box(name,[10,.25,4],[x,.13,z],color);this.scene.add(marker)});
   }
 
+  addFurniture(name,size,position,color,solid=true,materialOptions={}){
+    const object=box(name,size,position,color,mat(color,materialOptions));
+    this.scene.add(object);
+    if(solid)this.obstacles.push(object);
+    return object;
+  }
+
+  addRoom(x,z,width,depth,doors=[]){
+    const wall=.7,height=4.2;
+    const has=side=>doors.includes(side);
+    const split=(horizontal,side)=>{
+      const length=horizontal?width:depth;
+      const gap=has(side)?3.6:0;
+      if(!gap){
+        if(horizontal)this.addWall(x,z+(side==='N'?-depth/2:depth/2),length,wall);
+        else this.addWall(x+(side==='W'?-width/2:width/2),z,wall,length);
+        return;
+      }
+      const piece=(length-gap)/2;
+      if(horizontal){
+        const wz=z+(side==='N'?-depth/2:depth/2);
+        this.addWall(x-(gap+piece)/2,wz,piece,wall);
+        this.addWall(x+(gap+piece)/2,wz,piece,wall);
+      }else{
+        const wx=x+(side==='W'?-width/2:width/2);
+        this.addWall(wx,z-(gap+piece)/2,wall,piece);
+        this.addWall(wx,z+(gap+piece)/2,wall,piece);
+      }
+    };
+    split(true,'N');split(true,'S');split(false,'W');split(false,'E');
+  }
+
+  addTable(x,z,rotation=0){
+    const top=this.addFurniture('LabTable',[4.8,.28,2],[x,1.35,z],0x52626b,true,{metalness:.3});
+    top.rotation.y=rotation;
+    [[-1.8,-.7],[1.8,-.7],[-1.8,.7],[1.8,.7]].forEach(([dx,dz])=>{
+      const leg=this.addFurniture('TableLeg',[.22,1.3,.22],[x+dx,0.65,z+dz],0x303a40,false,{metalness:.25});
+      leg.rotation.y=rotation;
+    });
+  }
+
+  addBed(x,z,rotation=0){
+    const bed=this.addFurniture('MedicalBed',[2.2,.5,4.4],[x,.65,z],0xd4dce0,true);bed.rotation.y=rotation;
+    const pillow=this.addFurniture('Pillow',[1.5,.28,.75],[x,.99,z-1.45],0xeaf5f8,false);pillow.rotation.y=rotation;
+  }
+
+  addShelf(x,z,rotation=0){
+    const frame=this.addFurniture('ShelfFrame',[3.8,3.8,.55],[x,1.9,z],0x4c555b,true,{metalness:.35});frame.rotation.y=rotation;
+    [-1.15,0,1.15].forEach(y=>{const shelf=this.addFurniture('Shelf',[3.5,.12,.9],[x,y+1.7,z],0x74746a,false);shelf.rotation.y=rotation});
+  }
+
+  addMonitorDesk(x,z,rotation=0){
+    this.addTable(x,z,rotation);
+    const monitor=this.addFurniture('Monitor',[1.55,1,.18],[x,2.25,z],0x17242c,false,{emissive:0x2bbcff,emissiveIntensity:.8});monitor.rotation.y=rotation;
+  }
+
+  addGenerator(x,z){
+    this.addFurniture('Generator',[5,3.2,2.8],[x,1.6,z],0x555d3d,true,{metalness:.45});
+    const glow=this.addFurniture('GeneratorLight',[1.1,.35,.1],[x,2.2,z-1.46],0xff9f32,false,{emissive:0xff7200,emissiveIntensity:1.4});
+    return glow;
+  }
+
+  addPipe(x,z,length,rotation=0){
+    const pipe=this.addFurniture('Pipe',[length,.7,.7],[x,2.7,z],0x66747a,false,{metalness:.65});pipe.rotation.y=rotation;
+  }
+
+  createInteriors(){
+    // Research wing: four connected labs with benches, specimen tanks, and records.
+    this.addRoom(-116,-96,34,30,['E','S']);
+    this.addRoom(-116,-58,34,30,['E','N','S']);
+    this.addTable(-124,-101);this.addTable(-112,-101);this.addMonitorDesk(-121,-91);this.addMonitorDesk(-107,-91);
+    this.addTable(-124,-63);this.addTable(-112,-63);this.addShelf(-126,-51);this.addShelf(-108,-51);
+    [-127,-119,-111,-103].forEach(x=>this.addFurniture('SpecimenTank',[2.1,3.5,2.1],[x,1.75,-76],0x285b63,true,{transparent:true,opacity:.75,emissive:0x1b7480,emissiveIntensity:.35}));
+
+    // Medical wing: reception, treatment rooms, pharmacy and operating room.
+    this.addRoom(-116,58,34,26,['E','S']);this.addRoom(-116,90,34,28,['E','N','S']);this.addRoom(-116,120,34,22,['E','N']);
+    this.addMonitorDesk(-119,51);this.addShelf(-129,65);this.addBed(-125,87);this.addBed(-115,87);this.addBed(-105,87);
+    this.addShelf(-128,118);this.addShelf(-119,118);this.addShelf(-110,118);this.addTable(-106,122);
+
+    // Storage wing: dense shelving aisles and loading equipment.
+    this.addRoom(-65,-112,48,38,['E','W','N']);
+    [-82,-72,-62,-52].forEach(x=>{this.addShelf(x,-121);this.addShelf(x,-110);this.addShelf(x,-99)});
+    this.addFurniture('ForkliftBody',[4,1.4,2.4],[-43,.7,-120],0xd39b2d,true);
+    this.addFurniture('ForkliftMast',[.4,3.7,2.2],[-40.8,1.85,-120],0x33393d,true,{metalness:.5});
+
+    // Power sector: generators, transformer blocks, control desks and cable channels.
+    this.addRoom(25,-112,42,38,['E','W','N']);
+    this.addGenerator(12,-120);this.addGenerator(25,-120);this.addGenerator(38,-120);
+    this.addFurniture('Transformer',[5,4,4],[12,2,-99],0x4c5145,true,{metalness:.45});
+    this.addFurniture('Transformer',[5,4,4],[30,2,-99],0x4c5145,true,{metalness:.45});
+    this.addMonitorDesk(42,-100);
+
+    // Security sector: camera control room, armory lockers and detention cells.
+    this.addRoom(116,-91,34,34,['W','S']);this.addRoom(116,-51,34,32,['W','N','S']);
+    this.addMonitorDesk(107,-99);this.addMonitorDesk(118,-99);this.addMonitorDesk(127,-99);
+    [105,112,119,126].forEach(x=>this.addFurniture('SecurityLocker',[2,3.6,1.2],[x,1.8,-59],0x46525a,true,{metalness:.45}));
+    [-1,1].forEach(side=>this.addFurniture('CellBars',[.2,4,12],[116+side*9,2,-39],0x6c7478,true,{metalness:.8}));
+
+    // Underground: pump room and intersecting pipe corridors.
+    this.addRoom(114,69,38,36,['W','N','S']);this.addRoom(114,112,38,30,['W','N']);
+    this.addFurniture('Pump',[5,3.5,5],[104,1.75,66],0x465a62,true,{metalness:.6});
+    this.addFurniture('Pump',[5,3.5,5],[124,1.75,66],0x465a62,true,{metalness:.6});
+    this.addPipe(114,82,30,0);this.addPipe(104,105,18,Math.PI/2);this.addPipe(124,105,18,Math.PI/2);
+
+    // Central hub furniture and cover.
+    this.addRoom(-24,12,20,20,['N','S','E','W']);this.addRoom(24,12,20,20,['N','S','E','W']);
+    this.addMonitorDesk(-24,12);this.addMonitorDesk(24,12);
+    [[-38,52],[-18,52],[18,52],[38,52]].forEach(([x,z])=>this.addFurniture('HubBench',[7,.7,1.6],[x,.55,z],0x59666c,true));
+  }
+
   createObjectives(){
     const terminalLocations=[[-118,-75],[70,-108],[112,82]];
     terminalLocations.forEach(([x,z],i)=>{const t=new THREE.Group();t.position.set(x,0,z);t.name=`Terminal${i+1}`;const sm=mat(0x681f1f,{emissive:0xff2020,emissiveIntensity:1.2});t.add(box('TerminalBody',[2,2.4,1.2],[0,1.2,0],0x263239),box('TerminalScreen',[1.3,.75,.08],[0,1.55,-.64],0,sm));const code=String(Math.floor(1000+Math.random()*9000));t.userData={repaired:false,progress:0,screenMaterial:sm,assignedNpcId:null,code,cluesFound:new Set(),failures:0,lockedUntil:0};this.scene.add(t);this.terminals.push(t)});
@@ -69,12 +179,32 @@ export class Game{
 
   createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c)});this.scene.add(c);return c}
   createCharacters(){
-    const sp=[[-8,36],[0,38],[8,36],[14,32]],colors=[0x3e8fd1,0x3fae72,0xb07bd8,0xd59a43],hunter=[-125,-115];
-    const pool=Array.from({length:1000},(_,i)=>`NOVA-${String(i+1).padStart(4,"0")}`);
+    const pool=Array.from({length:1000},(_,i)=>({
+      id:`npc_${String(i+1).padStart(4,'0')}`,
+      name:`NOVA-${String(i+1).padStart(4,'0')}`,
+      color:new THREE.Color().setHSL((i*.61803398875)%1,.55,.52).getHex()
+    }));
     for(let i=pool.length-1;i>0;i-=1){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
-    const names=pool.slice(0,4);
-    if(this.role==="ESCAPEE"){this.playerPosition.set(0,0,34);this.yaw=Math.PI;this.playerModel=createEscapee({jacketColor:0xd59a43});sp.slice(0,3).forEach((p,i)=>this.escapees.push(this.createCharacter("ESCAPEE",p[0],p[1],colors[i],names[i])));this.pursuers.push(this.createCharacter("PURSUER",hunter[0],hunter[1],0x15191c,"WARDEN"))}
-    else{this.playerPosition.set(hunter[0],0,hunter[1]);this.yaw=Math.PI/2;this.playerModel=createPursuer();sp.forEach((p,i)=>this.escapees.push(this.createCharacter("ESCAPEE",p[0],p[1],colors[i],names[i])))}
+    const walkable=[[-72,-70],[-52,-52],[-22,-52],[18,-60],[68,-72],[112,-118],[-122,20],[-70,20],[-34,24],[12,24],[56,20],[112,10],[-120,105],[-74,104],[-32,104],[18,104],[68,104],[112,98],[0,62],[45,68]];
+    const escapeeCount=this.role==='ESCAPEE'?14:15;
+    const pursuerNpcCount=this.role==='PURSUER'?4:5;
+    if(this.role==='ESCAPEE'){
+      this.playerPosition.set(0,0,24);this.yaw=Math.PI;this.playerModel=createEscapee({jacketColor:0xd59a43});
+    }else{
+      this.playerPosition.set(-125,0,-125);this.yaw=Math.PI/2;this.playerModel=createPursuer();
+    }
+    for(let i=0;i<escapeeCount;i+=1){
+      const data=pool[i],spawn=walkable[i%walkable.length];
+      const npc=this.createCharacter('ESCAPEE',spawn[0],spawn[1],data.color,data.name);
+      npc.userData.entityId=data.id;
+      this.escapees.push(npc);
+    }
+    for(let i=0;i<pursuerNpcCount;i+=1){
+      const spawn=[[-128,-128],[128,-128],[-128,128],[128,128],[0,-128]][i];
+      const hunter=this.createCharacter('PURSUER',spawn[0],spawn[1],0x15191c,`WARDEN-${String(i+1).padStart(2,'0')}`);
+      hunter.userData.patrolIndex=i;
+      this.pursuers.push(hunter);
+    }
     this.playerModel.position.copy(this.playerPosition);this.playerModel.userData.animator=new CharacterAnimator(this.playerModel);this.playerAnimator=this.playerModel.userData.animator;this.scene.add(this.playerModel);this.syncPlayerModel();
   }
 
@@ -108,7 +238,7 @@ export class Game{
 
   addChatMessage(message){this.chatMessages.push(message);if(this.chatMessages.length>this.chatMaximum)this.chatMessages.shift();this.renderChat()}
   addSystemMessage(content){this.addChatMessage({label:"System",className:"system",displayName:"",content})}
-  addNpcMessage(npc,key,content,force=false){const now=performance.now();if(!force&&now<npc.userData.chatCooldownUntil)return;if(!force&&npc.userData.lastChatKey===key)return;npc.userData.chatCooldownUntil=now+8000+Math.random()*4000;npc.userData.lastChatKey=key;this.addChatMessage({label:npc.userData.type==="PURSUER"?"Pursuer":"Player",className:npc.userData.type==="PURSUER"?"pursuer":"player",displayName:npc.userData.name,content})}
+  addNpcMessage(npc,key,content,force=false){const now=performance.now();if(!force&&now<npc.userData.chatCooldownUntil)return;if(!force&&npc.userData.lastChatKey===key)return;npc.userData.chatCooldownUntil=now+8000+Math.random()*4000;npc.userData.lastChatKey=key;const identity=npc.userData.type==='PURSUER'?{label:'Pursuer',className:'pursuer'}:getSelectedRank(npcProfile(npc));this.addChatMessage({label:identity.label,className:identity.className,displayName:npc.userData.name,content})}
   renderChat(){this.chatLog.replaceChildren(...this.chatMessages.map(m=>{const p=document.createElement("p"),id=document.createElement("span"),body=document.createElement("span");p.className="game-chat__line";id.className=`game-chat__identity game-chat__identity--${m.className}`;id.textContent=m.displayName?`[${m.label}] ${m.displayName}:`:`[${m.label}]`;body.className="game-chat__content";body.textContent=` ${m.content}`;p.append(id,body);return p}));this.chatLog.scrollTop=this.chatLog.scrollHeight}
 
   createTouchControls(){
@@ -134,7 +264,7 @@ export class Game{
   setNpcState(npc,state){if(npc.userData.state===state)return;npc.userData.state=state;if(state==="FLEE")this.addNpcMessage(npc,"flee","The pursuer is here!");else if(state==="REPAIR")this.addNpcMessage(npc,"repair","Repairing a terminal.");else if(state==="ESCAPE")this.addNpcMessage(npc,"exit","The exit is open. Move!");else if(state==="CHASE"&&npc.userData.type==="PURSUER")this.addNpcMessage(npc,"chase","I found you.")}
   selectTerminalForNpc(npc){if(npc.userData.targetTerminal&&!npc.userData.targetTerminal.userData.repaired)return npc.userData.targetTerminal;const available=this.terminals.filter(t=>!t.userData.repaired).sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position)),terminal=available.find(t=>!t.userData.assignedNpcId||t.userData.assignedNpcId===npc.userData.entityId)||available[0];if(terminal){terminal.userData.assignedNpcId=npc.userData.entityId;npc.userData.targetTerminal=terminal}return terminal}
   updateEscapeeNpc(npc,dt){if(npc.userData.captured||npc.userData.escaped)return;const pursuer=this.role==="PURSUER"?{position:this.playerPosition}:this.pursuers[0],danger=pursuer?distanceXZ(npc.position,pursuer.position):Infinity;if(danger<13){this.setNpcState(npc,"FLEE");const away=npc.position.clone().sub(pursuer.position).setY(0);if(away.lengthSq()<.01)away.set(1,0,0);this.moveNpc(npc,npc.position.clone().add(away.normalize().multiplyScalar(12)),4.9,dt)}else if(this.repaired>=REQUIRED_TERMINALS){this.setNpcState(npc,"ESCAPE");this.moveNpc(npc,this.exitGate.position,3.9,dt);if(distanceXZ(npc.position,this.exitGate.position)<2){npc.userData.escaped=true;npc.visible=false;this.addSystemMessage(`${npc.userData.name} escaped.`)}}else{const terminal=this.selectTerminalForNpc(npc);if(!terminal)this.setNpcState(npc,"IDLE");else if(distanceXZ(npc.position,terminal.position)>2.1){this.setNpcState(npc,"WALK");this.moveNpc(npc,terminal.position,2.8,dt)}else{this.setNpcState(npc,"REPAIR");terminal.userData.progress+=dt/REPAIR_TIME*.55;if(terminal.userData.progress>=1)this.completeTerminal(terminal,npc)}}npc.userData.animator.update(dt,{state:npc.userData.state,injured:npc.userData.health===1})}
-  updatePursuerNpc(npc,dt){const candidates=[{isPlayer:true,position:this.playerPosition},...this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).map(e=>({isPlayer:false,entity:e,position:e.position}))];if(!candidates.length)return;candidates.sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position));const target=candidates[0],d=distanceXZ(npc.position,target.position);this.setNpcState(npc,d<24?"CHASE":"WALK");this.moveNpc(npc,target.position,d<24?4.7:2.4,dt);npc.userData.animator.update(dt,{state:npc.userData.state});if(d<1.25){if(target.isPlayer){this.addNpcMessage(npc,"caught","You're coming with me.",true);this.end("CAUGHT")}else{target.entity.userData.health-=1;if(target.entity.userData.health<=0)this.captureEscapee(target.entity);else target.entity.position.addScaledVector(target.entity.position.clone().sub(npc.position).setY(0).normalize(),3)}}}
+  updatePursuerNpc(npc,dt){const candidates=[{isPlayer:true,position:this.playerPosition},...this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).map(e=>({isPlayer:false,entity:e,position:e.position}))];if(!candidates.length)return;candidates.sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position));const target=candidates[Math.min(npc.userData.patrolIndex||0,candidates.length-1)],d=distanceXZ(npc.position,target.position);this.setNpcState(npc,d<24?"CHASE":"WALK");this.moveNpc(npc,target.position,d<24?4.7:2.4,dt);npc.userData.animator.update(dt,{state:npc.userData.state});if(d<1.25){if(target.isPlayer){this.addNpcMessage(npc,"caught","You're coming with me.",true);this.end("CAUGHT")}else{target.entity.userData.health-=1;if(target.entity.userData.health<=0)this.captureEscapee(target.entity);else target.entity.position.addScaledVector(target.entity.position.clone().sub(npc.position).setY(0).normalize(),3)}}}
   updateNpcs(dt){this.escapees.forEach(e=>this.updateEscapeeNpc(e,dt));if(this.role==="ESCAPEE")this.pursuers.forEach(p=>this.updatePursuerNpc(p,dt))}
   completeTerminal(terminal,npc=null){if(terminal.userData.repaired)return;terminal.userData.repaired=true;terminal.userData.progress=1;terminal.userData.screenMaterial.color.set(0x1f7848);terminal.userData.screenMaterial.emissive.set(0x29ff82);terminal.userData.assignedNpcId=null;this.repaired+=1;if(npc)this.addNpcMessage(npc,`terminal-${this.repaired}`,"Terminal restored!",true);this.escapees.forEach(e=>{if(e.userData.targetTerminal===terminal)e.userData.targetTerminal=null});if(this.repaired>=REQUIRED_TERMINALS){this.exitGate.userData.open=true;this.exitGate.userData.door.visible=false;this.addSystemMessage("All codes accepted. The final gate is open. Choose one of three routes.")}}
   nearestClue(){return this.clues.filter(c=>!c.userData.found).sort((a,b)=>distanceXZ(this.playerPosition,a.position)-distanceXZ(this.playerPosition,b.position))[0]||null}
