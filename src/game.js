@@ -30,7 +30,7 @@ export class Game{
     this.playerPosition=new THREE.Vector3();this.playerModel=null;this.playerAnimator=null;
     this.cameraModeIndex=0;this.cameraMode=CAMERA_MODES[0];this.cameraRay=new THREE.Raycaster();
     this.yaw=0;this.pitch=0;this.elapsed=0;this.stamina=100;this.repaired=0;this.repairProgress=0;
-    this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.playerHealth=3;this.lastTeamReplyAt=0;this.lastSafePlayerPosition=new THREE.Vector3();this.chatMessages=[];this.chatMaximum=10;
+    this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.playerHealth=3;this.lastTeamReplyAt=0;this.teamConversationHistory=[];this.npcConversationMemory=new Map();this.nextAmbientChatAt=performance.now()+5000+Math.random()*5000;this.ambientConversationId=0;this.lastSafePlayerPosition=new THREE.Vector3();this.chatMessages=[];this.chatMaximum=10;
     this.touch={sprint:false,sneak:false,interact:false};this.joystick={x:0,y:0,pointer:null};this.dragPointer=null;
     this.animate=this.animate.bind(this);this.keyDown=this.keyDown.bind(this);this.keyUp=this.keyUp.bind(this);this.mouseMove=this.mouseMove.bind(this);this.resize=this.resize.bind(this);
   }
@@ -297,34 +297,191 @@ export class Game{
       .slice(0,maximum);
   }
 
+  chooseFreshReply(speaker,category,replies){
+    const key=`${speaker.userData.entityId}:${category}`;
+    const used=this.npcConversationMemory.get(key)||[];
+    const available=replies.filter(reply=>!used.includes(reply));
+    const pool=available.length?available:replies;
+    const reply=pool[Math.floor(Math.random()*pool.length)];
+    const next=[...used,reply].slice(-Math.max(1,replies.length-1));
+    this.npcConversationMemory.set(key,next);
+    return reply;
+  }
+
+  getConversationContext(){
+    const active=this.escapees.filter(npc=>!npc.userData.captured&&!npc.userData.escaped).length;
+    const captured=this.escapees.filter(npc=>npc.userData.captured).length;
+    const found=this.clues.filter(clue=>clue.userData.found).length;
+    const remaining=this.terminals.filter(terminal=>!terminal.userData.repaired).length;
+    const nearestPursuer=this.pursuers
+      .map(npc=>distanceXZ(this.playerPosition,npc.position))
+      .sort((a,b)=>a-b)[0]??Infinity;
+    return {active,captured,found,remaining,nearestPursuer};
+  }
+
   scheduleNpcReply(content){
     if(this.role!=='ESCAPEE')return;
     const now=performance.now();
-    if(now-this.lastTeamReplyAt<1800)return;
+    if(now-this.lastTeamReplyAt<1200)return;
     this.lastTeamReplyAt=now;
     const lower=content.toLowerCase();
-    const nearby=this.getNearbyEscapees(6);
+    const nearby=this.getNearbyEscapees(8);
     if(!nearby.length)return;
     const direct=nearby.find(npc=>lower.includes(npc.userData.name.toLowerCase()));
     const speaker=direct||nearby[Math.floor(Math.random()*nearby.length)];
-    let replies;
-    if(/plan|strategy|ä½æ¦|ã©ããã|what do we do/.test(lower)){
-      replies=['Split into teams. Two search Research, two cover Medical.','I will search for clues. Stay away from the central corridor.','Let us finish one terminal at a time and regroup at the hub.'];
-    }else if(/help|å©ã|ææ´|è¿½ãã/.test(lower)){
-      replies=['I am coming to your position.','Keep moving. I will draw the Wardens away.','Head to the nearest room. I will cover the corridor.'];
+    const context=this.getConversationContext();
+    let category='general';
+    let replies=[];
+
+    if(/where|location|ã©ã|å ´æ/.test(lower)){
+      category='location';
+      const area=speaker.position.z>75?'north wing':speaker.position.z<-75?'south sector':speaker.position.x<-65?'west wing':speaker.position.x>65?'east wing':'central hub';
+      replies=[
+        `I am near the ${area}.`,
+        `My position is the ${area}. I can regroup at the hub.`,
+        `Check the ${area}. I am moving through that section now.`,
+        `I am at coordinates ${Math.round(speaker.position.x)}, ${Math.round(speaker.position.z)}.`
+      ];
+    }else if(/plan|strategy|ä½æ¦|ã©ããã|what do we do/.test(lower)){
+      category='strategy';
+      replies=context.remaining===3?[
+        'Three terminals remain. Split into three search teams and report every digit.',
+        'Start with Research and Power. Avoid the central corridor until we have two codes.',
+        'Two players should distract the Wardens while the rest search Medical and Security.',
+        `We have ${context.active} escapees active. Work in pairs and regroup after one terminal.`,
+        'Search the outer rooms first. The Wardens are more likely to patrol the hub.'
+      ]:context.remaining===2?[
+        'Two terminals remain. Keep one team on clues and one team ready at the gate.',
+        'We are making progress. Finish the nearest code before changing sectors.',
+        'Do not split too far now. The Wardens can isolate us in the side rooms.',
+        `Two terminals left and ${context.captured} captured. We should stay in groups.`
+      ]:[
+        'Only one terminal remains. Everyone else should prepare a final route.',
+        'Finish the last code, then regroup at the northern gate.',
+        'One terminal left. I will search while the others draw the Wardens away.'
+      ];
+    }else if(/help|å©ã|ææ´|è¿½ãã|warden|é¬¼/.test(lower)){
+      category='help';
+      replies=context.nearestPursuer<14?[
+        'A Warden is close. Turn into the nearest room and break line of sight!',
+        'Keep running north. I will cross behind and distract it.',
+        'Do not stop. Use the shelves as cover and circle back to the hub.',
+        'I am moving toward you. Stay away from dead-end rooms.'
+      ]:[
+        'I do not see a Warden near you. Regroup with the closest team.',
+        'Your area looks clear for now. Move toward a clue marker.',
+        'I am on the way. Hold near a room with two exits.',
+        'Copy. Mark your sector and keep moving.'
+      ];
     }else if(/terminal|code|clue|ãã³ã|ç«¯æ«|ã³ã¼ã/.test(lower)){
-      replies=['I will check the nearest clue location.','Share every digit you find. I am heading to a terminal.','Understood. I will search the Security and Medical wings.'];
+      category='objective';
+      replies=[
+        `${context.found} clues have been found. ${context.remaining} terminals still need codes.`,
+        'I will search Security. Someone else check Medical records and the Power panels.',
+        'Share the terminal number and digit position, not just the digit.',
+        'I am checking the nearest blue clue marker now.',
+        'If a terminal locks, leave it for thirty seconds and search another wing.',
+        'We should complete one code before everyone moves to the next terminal.'
+      ];
     }else if(/tunnel|rooftop|cargo|route|ã«ã¼ã|å±ä¸|è²¨ç©|ãã³ãã«/.test(lower)){
-      replies=['I vote for the tunnel. It has more cover.','Cargo is longer, but the containers give us cover.','Rooftop is risky. We should regroup before selecting it.'];
+      category='route';
+      replies=[
+        'Tunnel has the most cover, but the narrow turns can trap us.',
+        'Cargo gives us room to spread out. I prefer Cargo if several Wardens survive.',
+        'Rooftop is fast but exposed. We should only choose it if the team is together.',
+        `With ${context.active} escapees active, Cargo is probably the safest choice.`,
+        'Wait until the gate opens. The nearest Warden position should decide the route.'
+      ];
     }else if(/thanks|thank you|ãããã¨ã/.test(lower)){
-      replies=['You are welcome.','No problem. Let us get out together.','Anytime. Stay safe.'];
+      category='thanks';
+      replies=['You are welcome.','No problem. Let us get out together.','Anytime. Stay safe.','We are a team. Keep moving.','Glad to help. Tell me if you find another clue.'];
     }else if(/hello|hi|hey|ããã«ã¡ã¯|ãã/.test(lower)){
-      replies=['Hey. I am ready.','Hello. Let us find those clues.','I hear you. What is the plan?'];
+      category='greeting';
+      replies=['Hey. I am ready.','Hello. Let us find those clues.','I hear you. What is the plan?','Hi. I am checking the nearby rooms.','Hello. Stay on the team channel if you spot a Warden.'];
+    }else if(/yes|ok|okay|äºè§£|ããã£ã/.test(lower)){
+      category='ack';
+      replies=['Copy. Moving now.','Understood. I will update the team.','Okay. I will take the next room.','Got it. Stay on this channel.'];
+    }else if(/tired|ç²ã|ä¼ã¿|sleep|ç /.test(lower)){
+      category='condition';
+      replies=['Same here, but keep moving until we find a room with two exits.','Take a short breath in the next safe room. I will watch the corridor.','Save your stamina. Walk until a Warden gets close.','We are almost there. Do not spend all your stamina at once.'];
+    }else if(/scary|æ|ãã|terrifying/.test(lower)){
+      category='fear';
+      replies=['The masks are unsettling, but the Wardens are predictable in open corridors.','Stay near the team channel. It is easier when we share their positions.','I know. Keep a wall between you and the red lights.','Do not look back for too long. Focus on the next doorway.'];
+    }else if(/food|hungry|ãè¹|è¹æ¸|é£ã¹/.test(lower)){
+      category='smalltalk-food';
+      replies=['If we escape, I am finding the biggest meal in the city.','I found an old vending machine, but I would not trust anything inside it.','Now you made me hungry too. Let us finish the terminals first.','Deal. First one out chooses where we eat.'];
+    }else if(/game|ã²ã¼ã |fun|æ¥½ãã/.test(lower)){
+      category='smalltalk-game';
+      replies=['This place would be more fun without six Wardens chasing us.','I prefer games where the doors are not trying to lock us inside.','Ask me again after we escape. Right now I am counting exits.','The clue hunt is interesting. The alarms, not so much.'];
+    }else if(/weather|å¤©æ°|rain|é¨|sunny|æ´/.test(lower)){
+      category='smalltalk-weather';
+      replies=['I cannot see outside from this wing. The rooftop route might answer that.','The air vents sound like rain, but it could just be the generators.','Anything outside would be better than this lighting.','If the rooftop is clear, I hope the weather stays calm.'];
+    }else if(/name|åå|who are you|èª°/.test(lower)){
+      category='identity';
+      replies=[`I am ${speaker.userData.name}. I am covering the nearby rooms.`,`Call me ${speaker.userData.name}. I will report clues on this channel.`,`My tag is ${speaker.userData.name}. What sector are you taking?`];
+    }else if(/joke|åè«|é¢ç½ããã¨/.test(lower)){
+      category='joke';
+      replies=['A Warden walked into a locked terminal. The terminal won.','Why did the escapee carry a map? Because every corridor looked exactly the same.','I would tell a better joke, but the Security cameras are listening.','The good news is we found a shortcut. The bad news is a Warden found it too.'];
+    }else if(/why|ãªã|ãªãã§/.test(lower)){
+      category='why';
+      replies=['I do not know yet. Let us collect more clues before guessing.','Good question. The facility records might explain it.','There may be an answer in Research or Security.','I was wondering the same thing. We should compare what everyone has found.'];
     }else{
-      replies=['Understood.','Copy that.','I hear you.','Stay together and keep moving.'];
+      category='general';
+      replies=[
+        'Copy that. What sector should I cover?',
+        'I hear you. Give me a target or a route.',
+        'Understood. I will keep searching nearby.',
+        `We still have ${context.remaining} terminals left.`,
+        'I am listening. Do you need help, clues, or a route vote?',
+        'Stay together and keep moving. I will report anything useful.'
+      ];
     }
-    const reply=replies[Math.floor(Math.random()*replies.length)];
-    setTimeout(()=>{if(this.running&&!speaker.userData.captured)this.addNpcMessage(speaker,`reply-${Date.now()}`,reply,true)},550+Math.random()*850);
+
+    const reply=this.chooseFreshReply(speaker,category,replies);
+    this.teamConversationHistory.push({speaker:speaker.userData.name,category,reply,at:Date.now()});
+    this.teamConversationHistory=this.teamConversationHistory.slice(-30);
+    setTimeout(()=>{
+      if(this.running&&!speaker.userData.captured&&!speaker.userData.escaped){
+        this.addNpcMessage(speaker,`reply-${category}-${Date.now()}`,reply,true);
+      }
+    },450+Math.random()*950);
+  }
+
+  ambientDialoguePool(){
+    const context=this.getConversationContext();
+    return [
+      ['I am checking the next room.','Copy. I will cover the corridor.'],
+      [`We have ${context.found} clues so far.`,`I will search the opposite wing.`],
+      ['Did anyone check Medical?','Not yet. I can head there now.'],
+      ['The central hub is too exposed.','Agreed. Use the side rooms for cover.'],
+      ['I heard movement near Security.','I will mark it and take another route.'],
+      ['My stamina is low.','Walk for a moment. I will stay nearby.'],
+      ['Which route do we use after the gate?','Let us decide after we know where the Wardens are.'],
+      ['These rooms all look alike.','Follow the ceiling lights and sector colors.'],
+      ['I found another dead end.','Turn back toward the hub. I can guide you from there.'],
+      ['Stay on the channel, everyone.','Copy. Reporting any Warden positions.']
+    ];
+  }
+
+  updateAmbientConversation(){
+    if(this.role!=='ESCAPEE'||this.chatOpen||this.ended)return;
+    const now=performance.now();
+    if(now<this.nextAmbientChatAt)return;
+    this.nextAmbientChatAt=now+9000+Math.random()*9000;
+    const available=this.escapees.filter(npc=>!npc.userData.captured&&!npc.userData.escaped&&distanceXZ(this.playerPosition,npc.position)<80);
+    if(available.length<2)return;
+    const first=available[Math.floor(Math.random()*available.length)];
+    const others=available.filter(npc=>npc!==first);
+    const second=others[Math.floor(Math.random()*others.length)];
+    const conversations=this.ambientDialoguePool();
+    const pair=conversations[this.ambientConversationId%conversations.length];
+    this.ambientConversationId+=1;
+    this.addNpcMessage(first,`ambient-a-${this.ambientConversationId}`,pair[0],true);
+    setTimeout(()=>{
+      if(this.running&&!second.userData.captured&&!second.userData.escaped&&!this.chatOpen){
+        this.addNpcMessage(second,`ambient-b-${this.ambientConversationId}`,pair[1],true);
+      }
+    },900+Math.random()*1200);
   }
 
   thankForGift(target){
@@ -418,7 +575,7 @@ export class Game{
   grantMatchReward(result){if(this.rewardGranted||this.profile.role==="GUEST")return 0;this.rewardGranted=true;const reward=this.calculateReward(result);if(reward>0){addCoins(this.profile,reward);this.onCoinsChanged?.({profile:this.profile,amount:reward,result})}return reward}
   updateHud(){const remaining=Math.max(0,MATCH_TIME-this.elapsed);this.ui.time.textContent=`${String(Math.floor(remaining/60)).padStart(2,"0")}:${String(Math.floor(remaining%60)).padStart(2,"0")}`;this.ui.terminals.textContent=`${this.repaired} / ${REQUIRED_TERMINALS}`;const captured=this.escapees.filter(e=>e.userData.captured).length,active=this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).length;this.ui.captured.textContent=`${captured} / ${this.escapees.length}`;this.ui.active.textContent=`${active+(this.role==="ESCAPEE"?1:0)} ACTIVE`;this.ui.health.textContent=`${Math.max(0,this.playerHealth)} / 3`;this.ui.stamina.textContent=`${Math.round(this.stamina)}%`}
   end(title){if(this.ended)return;this.ended=true;this.running=false;this.closeChat(false);document.exitPointerLock?.();const reward=this.grantMatchReward(title),overlay=document.createElement("section");overlay.className="overlay";overlay.innerHTML=`<article class="overlay-card"><h2>${title}</h2>${reward>0?`<p class="match-reward">+${reward.toLocaleString()} Coins</p>`:""}<div class="menu-actions"><button class="menu-button menu-button--primary" data-retry>RETRY</button><button class="menu-button" data-menu>MENU</button></div></article>`;document.body.appendChild(overlay);overlay.querySelector("[data-retry]").onclick=()=>{this.stop();this.onRetry?.()};overlay.querySelector("[data-menu]").onclick=()=>{this.stop();this.onExit?.()};this.overlay=overlay}
-  animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.elapsed+=dt;this.updatePlayer(dt);this.updateNpcs(dt);this.updateObjectives(dt);this.updateCamera();this.updateHud();this.checkMatchEnd();this.updateStuckRecovery(dt);if(this.elapsed>=MATCH_TIME)this.end(this.role==="PURSUER"?"PURSUER WIN":"TIME EXPIRED");this.renderer.render(this.scene,this.camera)}
+  animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.elapsed+=dt;this.updatePlayer(dt);this.updateNpcs(dt);this.updateObjectives(dt);this.updateCamera();this.updateHud();this.checkMatchEnd();this.updateStuckRecovery(dt);this.updateAmbientConversation();if(this.elapsed>=MATCH_TIME)this.end(this.role==="PURSUER"?"PURSUER WIN":"TIME EXPIRED");this.renderer.render(this.scene,this.camera)}
   resize(){this.camera.aspect=this.container.clientWidth/this.container.clientHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false)}
   stop(){this.running=false;cancelAnimationFrame(this.frame);clearTimeout(this.viewToastTimer);removeEventListener("keydown",this.keyDown);removeEventListener("keyup",this.keyUp);removeEventListener("mousemove",this.mouseMove);removeEventListener("resize",this.resize);this.hud?.remove();this.chatRoot?.remove();this.touchRoot?.remove();this.overlay?.remove();this.renderer?.dispose();this.renderer?.domElement.remove()}
 }
