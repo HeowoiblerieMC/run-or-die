@@ -69,7 +69,7 @@ export class Game{
     const has=side=>doors.includes(side);
     const split=(horizontal,side)=>{
       const length=horizontal?width:depth;
-      const gap=has(side)?3.6:0;
+      const gap=has(side)?6.2:0;
       if(!gap){
         if(horizontal)this.addWall(x,z+(side==='N'?-depth/2:depth/2),length,wall);
         else this.addWall(x+(side==='W'?-width/2:width/2),z,wall,length);
@@ -185,7 +185,7 @@ export class Game{
     [['TUNNEL',-42,126,0x57cfff],['ROOFTOP',0,126,0xa8e85c],['CARGO',42,126,0xff9f32]].forEach(([name,x,z,color])=>{const route=new THREE.Group();route.position.set(x,0,z);route.add(box(name,[13,.3,12],[0,.15,0],color,mat(color,{emissive:color,emissiveIntensity:.45})));route.userData={name,active:false};this.scene.add(route);this.finalRoutes.push(route)});
   }
 
-  createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c),nextAttackAt:0,lastSafePosition:new THREE.Vector3(x,0,z),noMoveTime:0,aiRole:'SCOUT',decisionUntil:0,thoughtUntil:0,followPlayerUntil:0,targetClue:null,targetPoint:null,sharedClues:new Set(),navPath:[],navIndex:0,nextPathAt:performance.now()+250+Math.random()*2200,lastPathTarget:new THREE.Vector3(),movementIntent:false});this.scene.add(c);return c}
+  createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c),nextAttackAt:0,lastSafePosition:new THREE.Vector3(x,0,z),noMoveTime:0,aiRole:'SCOUT',decisionUntil:0,thoughtUntil:0,followPlayerUntil:0,targetClue:null,targetPoint:null,sharedClues:new Set(),navPath:[],navIndex:0,nextPathAt:performance.now()+250+Math.random()*2200,lastPathTarget:new THREE.Vector3(),movementIntent:false,pathFailures:0,unreachableUntil:0,lastProgressAt:performance.now(),lastProgressPosition:new THREE.Vector3(x,0,z)});this.scene.add(c);return c}
   isSpawnClear(position,radius=2.4){
     if(this.collision(position.x,position.z,radius))return false;
     return [...this.escapees,...this.pursuers].every(npc=>distanceXZ(position,npc.position)>radius*2.2);
@@ -220,11 +220,11 @@ export class Game{
       const wantsMove=entity.userData.movementIntent===true;entity.userData.movementIntent=false;
       entity.userData.noMoveTime=wantsMove&&moved<.012?(entity.userData.noMoveTime||0)+dt:0;
       this.rememberSafePosition(entity,entity.userData.type==='PURSUER'?1:.75);
-      if(entity.userData.noMoveTime>3.5){
+      if(entity.userData.noMoveTime>2.6){
         const safe=entity.userData.lastSafePosition;
         if(safe&&!this.collision(safe.x,safe.z,1)){entity.position.copy(safe)}
         else{const around=[[entity.position.x+8,entity.position.z],[entity.position.x-8,entity.position.z],[entity.position.x,entity.position.z+8],[entity.position.x,entity.position.z-8],[0,24],[-70,20],[70,20],[0,62],[-32,104],[68,104]];entity.position.copy(this.findSafeSpawn(around,2));}
-        entity.userData.noMoveTime=0;
+        entity.userData.noMoveTime=0;entity.userData.navPath=[];entity.userData.navIndex=0;entity.userData.nextPathAt=0;
       }
     }
     if(!this.collision(this.playerPosition.x,this.playerPosition.z,.65))this.lastSafePlayerPosition.copy(this.playerPosition);
@@ -550,7 +550,7 @@ export class Game{
   }
 
   findNavigationPath(from,to,radius=.8){
-    const cell=7;
+    const cell=3.5;
     const start=this.worldToNav(from,cell);
     const goal=this.worldToNav(to,cell);
     const key=node=>`${node.x},${node.z}`;
@@ -563,7 +563,7 @@ export class Game{
     let reached=null;
     let visited=0;
 
-    while(open.length&&visited<850){
+    while(open.length&&visited<2400){
       visited+=1;
       let bestIndex=0;
       let bestScore=Infinity;
@@ -574,7 +574,7 @@ export class Game{
       }
       const current=open.splice(bestIndex,1)[0];
       openKeys.delete(key(current));
-      if(Math.abs(current.x-goal.x)<=1&&Math.abs(current.z-goal.z)<=1){reached=current;break}
+      if(Math.abs(current.x-goal.x)<=2&&Math.abs(current.z-goal.z)<=2){reached=current;break}
 
       for(const [dx,dz] of directions){
         const next={x:current.x+dx,z:current.z+dz};
@@ -615,33 +615,81 @@ export class Game{
   }
   navigationTarget(npc,target,radius){
     const now=performance.now();
-    const targetMoved=distanceXZ(npc.userData.lastPathTarget,target)>5;
-    const direct=this.hasClearPath(npc.position,target,radius);
-    if(direct){
-      npc.userData.navPath=[];npc.userData.navIndex=0;
+    const targetMoved=distanceXZ(npc.userData.lastPathTarget,target)>4;
+    if(this.hasClearPath(npc.position,target,radius)){
+      npc.userData.navPath=[];npc.userData.navIndex=0;npc.userData.pathFailures=0;
       return target;
     }
-    if((targetMoved||!npc.userData.navPath.length)&&now>=npc.userData.nextPathAt){
-      npc.userData.navPath=this.findNavigationPath(npc.position,target,radius);
-      npc.userData.navIndex=0;
-      npc.userData.nextPathAt=now+1800+Math.random()*900;
-      npc.userData.lastPathTarget.copy(target);
+
+    const currentProgress=distanceXZ(npc.position,npc.userData.lastProgressPosition);
+    if(currentProgress>1.2){
+      npc.userData.lastProgressPosition.copy(npc.position);
+      npc.userData.lastProgressAt=now;
+      npc.userData.pathFailures=0;
     }
+
+    const stalled=now-npc.userData.lastProgressAt>1800;
+    if(stalled){
+      npc.userData.navPath=[];
+      npc.userData.navIndex=0;
+      npc.userData.nextPathAt=0;
+      npc.userData.lastProgressAt=now;
+      npc.userData.pathFailures+=1;
+    }
+
+    if((targetMoved||!npc.userData.navPath.length)&&now>=npc.userData.nextPathAt){
+      const path=this.findNavigationPath(npc.position,target,radius);
+      npc.userData.navPath=path;
+      npc.userData.navIndex=0;
+      npc.userData.nextPathAt=now+1100+Math.random()*700;
+      npc.userData.lastPathTarget.copy(target);
+      if(path.length){
+        npc.userData.pathFailures=0;
+        npc.userData.unreachableUntil=0;
+      }else{
+        npc.userData.pathFailures+=1;
+        npc.userData.unreachableUntil=now+2500+Math.random()*1500;
+      }
+    }
+
     if(!npc.userData.navPath.length){
-      const desired=target.clone().sub(npc.position).setY(0).normalize();
-      for(const angle of[65,-65,100,-100,145,-145]){
+      const desired=target.clone().sub(npc.position).setY(0);
+      if(desired.lengthSq()<.01)return npc.position;
+      desired.normalize();
+      const turnOrder=npc.userData.avoidanceSide>0?[55,-55,90,-90,135,-135,180]:[-55,55,-90,90,-135,135,180];
+      for(const angle of turnOrder){
         const direction=desired.clone().applyAxisAngle(UP,THREE.MathUtils.degToRad(angle));
-        const local=npc.position.clone().add(direction.multiplyScalar(4));
-        if(!this.collision(local.x,local.z,radius))return local;
+        for(const distance of[5,3]){
+          const local=npc.position.clone().add(direction.clone().multiplyScalar(distance));
+          if(!this.collision(local.x,local.z,radius)&&this.hasClearPath(npc.position,local,radius))return local;
+        }
       }
       return npc.position;
     }
+
     const path=npc.userData.navPath;
-    while(npc.userData.navIndex<path.length-1&&distanceXZ(npc.position,path[npc.userData.navIndex])<1.7){npc.userData.navIndex+=1}
+    while(npc.userData.navIndex<path.length-1&&distanceXZ(npc.position,path[npc.userData.navIndex])<1.25){
+      npc.userData.navIndex+=1;
+    }
     return path[npc.userData.navIndex]||target;
   }
-
-  chooseNpcDirection(npc,desired){const r=npc.userData.type==="PURSUER"?.78:.52,side=npc.userData.avoidanceSide||1;for(const angle of[0,25*side,-25*side,50*side,-50*side,75*side,-75*side,110,-110,160,-160,180]){const candidate=desired.clone().applyAxisAngle(UP,THREE.MathUtils.degToRad(angle));if(!this.collision(npc.position.x+candidate.x*1.3,npc.position.z+candidate.z*1.3,r)){if(angle!==0&&angle!==180)npc.userData.avoidanceSide=Math.sign(angle)||side;return candidate}}return null}
+  chooseNpcDirection(npc,desired){
+    const radius=npc.userData.type==='PURSUER'?.86:.62;
+    const side=npc.userData.avoidanceSide||1;
+    const angles=[0,18*side,-18*side,35*side,-35*side,55*side,-55*side,80*side,-80*side,110,-110,145,-145,180];
+    for(const angle of angles){
+      const candidate=desired.clone().applyAxisAngle(UP,THREE.MathUtils.degToRad(angle));
+      const nearX=npc.position.x+candidate.x*1.4;
+      const nearZ=npc.position.z+candidate.z*1.4;
+      const farX=npc.position.x+candidate.x*3.2;
+      const farZ=npc.position.z+candidate.z*3.2;
+      if(!this.collision(nearX,nearZ,radius)&&!this.collision(farX,farZ,radius*.9)){
+        if(angle!==0&&angle!==180)npc.userData.avoidanceSide=Math.sign(angle)||side;
+        return candidate;
+      }
+    }
+    return null;
+  }
   moveNpc(npc,target,speed,dt){
     npc.userData.movementIntent=true;
     const radius=npc.userData.type==='PURSUER'?.86:.62;
@@ -676,15 +724,20 @@ export class Game{
   }
 
   chooseNpcClue(npc){
-    if(npc.userData.targetClue&&!npc.userData.targetClue.userData.found)return npc.userData.targetClue;
-    const available=this.clues
-      .filter(clue=>!clue.userData.found)
-      .sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position));
+    const now=performance.now();
+    if(npc.userData.targetClue&&!npc.userData.targetClue.userData.found&&now>=npc.userData.unreachableUntil){
+      return npc.userData.targetClue;
+    }
     const claimed=new Set(this.escapees.map(other=>other!==npc?other.userData.targetClue:null).filter(Boolean));
-    npc.userData.targetClue=available.find(clue=>!claimed.has(clue))||available[0]||null;
+    const available=this.clues
+      .filter(clue=>!clue.userData.found&&!claimed.has(clue))
+      .sort((a,b)=>distanceXZ(npc.position,a.position)-distanceXZ(npc.position,b.position));
+    npc.userData.targetClue=available[0]||this.clues.find(clue=>!clue.userData.found)||null;
+    npc.userData.navPath=[];
+    npc.userData.navIndex=0;
+    npc.userData.nextPathAt=0;
     return npc.userData.targetClue;
   }
-
   collectClueForNpc(npc,clue){
     if(!clue||clue.userData.found)return;
     clue.userData.found=true;clue.visible=false;
@@ -736,6 +789,13 @@ export class Game{
     const now=performance.now();
     const pursuer=this.nearestPursuerTo(npc.position);
     const danger=pursuer?distanceXZ(npc.position,pursuer.position):Infinity;
+    if(npc.userData.pathFailures>=3&&npc.userData.targetClue){
+      npc.userData.targetClue=null;
+      npc.userData.navPath=[];
+      npc.userData.navIndex=0;
+      npc.userData.pathFailures=0;
+      npc.userData.unreachableUntil=now+1800;
+    }
     const cautious=npc.userData.personality==='CAUTIOUS';
     const dangerRadius=cautious?18:14;
 
