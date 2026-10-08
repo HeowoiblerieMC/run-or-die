@@ -1,84 +1,19 @@
-import { getChatIdentity } from "./account.js";
-
-const rooms = new Map();
-
-function makeRoomCode() {
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    return Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
-}
-
-export class LocalLobbyService extends EventTarget {
-    constructor(profile) {
-        super();
-        this.profile = profile;
-        this.room = null;
-        this.lastMessageAt = 0;
-        this.lastMessage = "";
-    }
-
-    createRoom() {
-        let code;
-        do code = makeRoomCode(); while (rooms.has(code));
-        const room = {
-            code,
-            ownerId: this.profile.id,
-            players: [{ ...this.profile, ready: false }],
-            messages: []
-        };
-        rooms.set(code, room);
-        this.room = room;
-        this.emitUpdate();
-        return room;
-    }
-
-    joinRoom(code) {
-        const room = rooms.get(code.trim().toUpperCase());
-        if (!room) throw new Error("Room was not found in this browser session.");
-        if (room.players.length >= 5) throw new Error("Room is full.");
-        if (!room.players.some(player => player.id === this.profile.id)) room.players.push({ ...this.profile, ready: false });
-        this.room = room;
-        this.emitUpdate();
-        return room;
-    }
-
-    leaveRoom() {
-        if (!this.room) return;
-        this.room.players = this.room.players.filter(player => player.id !== this.profile.id);
-        if (this.room.players.length === 0) rooms.delete(this.room.code);
-        this.room = null;
-        this.emitUpdate();
-    }
-
-    toggleReady() {
-        const player = this.room?.players.find(item => item.id === this.profile.id);
-        if (!player) return;
-        player.ready = !player.ready;
-        this.emitUpdate();
-    }
-
-    sendMessage(content) {
-        if (!this.room) throw new Error("Join a room first.");
-        const clean = content.trim().slice(0, 120);
-        if (!clean) return;
-        const now = Date.now();
-        if (now - this.lastMessageAt < 1000) throw new Error("Please wait before sending another message.");
-        if (clean === this.lastMessage) throw new Error("Duplicate messages are not allowed.");
-        const identity = getChatIdentity(this.profile);
-        this.room.messages.push({
-            id: crypto.randomUUID(),
-            userId: this.profile.id,
-            displayName: this.profile.displayName,
-            label: identity.label,
-            className: identity.className,
-            content: clean,
-            createdAt: new Date().toISOString()
-        });
-        this.lastMessageAt = now;
-        this.lastMessage = clean;
-        this.emitUpdate();
-    }
-
-    emitUpdate() {
-        this.dispatchEvent(new CustomEvent("update", { detail: this.room }));
-    }
-}
+import "./style.css";
+import {Game} from "./game.js";
+import {AccountService,getChatIdentity} from "./account.js";
+import {LocalLobbyService} from "./multiplayer.js";
+const app=document.querySelector("#app"),auth=new AccountService();document.querySelector("#startup-status")?.remove();let profile=auth.getSession(),screen,game,lobby;
+const clear=()=>{screen?.remove();screen=null};const button=(text,primary=false)=>{const b=document.createElement("button");b.className=`menu-button ${primary?"menu-button--primary":""}`;b.textContent=text;return b};const error=(el,e)=>{el.hidden=false;el.textContent=e.message||e};
+function tag(p){const r=getChatIdentity(p);return `<span class="role-tag role-tag--${r.className}">[${r.label}]</span>`}
+function landing(){clear();screen=document.createElement("section");screen.className="title-screen";screen.innerHTML=`<div class="title-card"><p class="eyebrow">NOVA INTERACTIVE</p><h1><span>RUN</span><span>FOR LIVE</span></h1><p class="lead">Restore. Run. Escape.</p><div class="menu-actions" data-a></div></div>`;const g=button("PLAY AS GUEST",true),s=button("SIGN IN"),c=button("CREATE ACCOUNT");g.onclick=()=>{profile=auth.createGuest();home()};s.onclick=signIn;c.onclick=register;screen.querySelector("[data-a]").append(g,s,c);app.appendChild(screen)}
+function panel(title){clear();screen=document.createElement("section");screen.className="menu-screen";screen.innerHTML=`<article class="menu-panel account-panel"><p class="eyebrow">RUN FOR LIVE</p><h2>${title}</h2><form class="account-form" data-f></form><p class="form-error" data-e hidden></p><div class="menu-actions"><button type="button" class="menu-button" data-b>BACK</button></div></article>`;screen.querySelector("[data-b]").onclick=landing;app.appendChild(screen);return[screen.querySelector("[data-f]"),screen.querySelector("[data-e]")]}
+const input=(placeholder,type="text")=>{const i=document.createElement("input");i.placeholder=placeholder;i.type=type;return i};
+function signIn(){const[f,e]=panel("SIGN IN"),id=input("Login ID"),pw=input("Password","password"),go=button("SIGN IN",true);go.type="submit";f.append(id,pw,go);f.onsubmit=async ev=>{ev.preventDefault();try{profile=await auth.signIn(id.value,pw.value);home()}catch(x){error(e,x)}}}
+function register(){const[f,e]=panel("CREATE ACCOUNT"),name=input("Display name"),id=input("Login ID"),pw=input("Password: 12+ characters","password"),cp=input("Confirm password","password"),go=button("CREATE ACCOUNT",true);go.type="submit";f.append(name,id,pw,cp,go);f.onsubmit=async ev=>{ev.preventDefault();try{const r=await auth.register({displayName:name.value,loginId:id.value,password:pw.value,confirmPassword:cp.value});profile=r.profile;recovery(r.recoveryCode)}catch(x){error(e,x)}}}
+function recovery(code){clear();screen=document.createElement("section");screen.className="menu-screen";screen.innerHTML=`<article class="menu-panel"><h2>RECOVERY CODE</h2><p class="recovery-code"></p><div class="notice-box notice-box--danger">Save this code safely. Losing both password and code makes recovery impossible.</div><div class="menu-actions"></div></article>`;screen.querySelector(".recovery-code").textContent=code;const copy=button("COPY",true),next=button("CONTINUE");copy.onclick=()=>navigator.clipboard.writeText(code);next.onclick=home;screen.querySelector(".menu-actions").append(copy,next);app.appendChild(screen)}
+function home(){clear();const r=getChatIdentity(profile);screen=document.createElement("section");screen.className="menu-screen";screen.innerHTML=`<article class="menu-panel"><p class="eyebrow">PLAYER PROFILE</p><h2>${tag(profile)} <span data-name></span></h2><div class="profile-grid"><div><small>ESCAPEE</small><strong>${profile.escapeeRank}</strong></div><div><small>PURSUER</small><strong>${profile.pursuerRank}</strong></div><div><small>ROLE</small><strong class="role-text--${r.className}">${r.label}</strong></div></div><div class="menu-actions" data-a></div></article>`;screen.querySelector("[data-name]").textContent=profile.displayName;const play=button("PLAY NPC MATCH",true),create=button("CREATE ROOM"),join=button("JOIN ROOM"),out=button("SIGN OUT");play.onclick=roulette;create.onclick=()=>{lobby=new LocalLobbyService(profile);lobby.createRoom();showLobby()};join.onclick=joinRoom;out.onclick=()=>{auth.signOut();profile=null;landing()};screen.querySelector("[data-a]").append(play,create,join,out);app.appendChild(screen)}
+function joinRoom(){const[f,e]=panel("JOIN ROOM"),id=input("6-character room code"),go=button("JOIN",true);go.type="submit";f.append(id,go);f.onsubmit=ev=>{ev.preventDefault();try{lobby=new LocalLobbyService(profile);lobby.joinRoom(id.value);showLobby()}catch(x){error(e,x)}}}
+function showLobby(){clear();screen=document.createElement("section");screen.className="lobby-screen";screen.innerHTML=`<div class="lobby-layout"><section class="lobby-card"><h2>ROOM <span data-code></span></h2><div data-players></div><div class="menu-actions" data-actions></div></section><section class="lobby-card"><h2>LOBBY CHAT</h2><div class="chat-log" data-chat></div><form class="chat-form"><input maxlength="120" placeholder="Type a message..."><button class="menu-button menu-button--primary">SEND</button></form><p class="form-error" data-error hidden></p></section></div>`;const render=room=>{screen.querySelector("[data-code]").textContent=room.code;screen.querySelector("[data-players]").innerHTML=room.players.map(p=>`<div class="player-row"><span>${tag(p)} ${p.displayName}</span><em>${p.ready?"READY":"NOT READY"}</em></div>`).join("");const log=screen.querySelector("[data-chat]");log.innerHTML=room.messages.map(m=>`<p><span class="role-tag role-tag--${m.className}">[${m.label}]</span> <strong>${m.displayName}:</strong> <span class="chat-message__content"></span></p>`).join("");[...log.querySelectorAll(".chat-message__content")].forEach((el,i)=>el.textContent=room.messages[i].content)};lobby.addEventListener("update",e=>render(e.detail));const ready=button("TOGGLE READY",true),start=button("START NPC MATCH"),leave=button("LEAVE");ready.onclick=()=>lobby.toggleReady();start.onclick=roulette;leave.onclick=()=>{lobby.leaveRoom();home()};screen.querySelector("[data-actions]").append(ready,start,leave);const form=screen.querySelector("form"),chat=form.querySelector("input"),err=screen.querySelector("[data-error]");form.onsubmit=e=>{e.preventDefault();try{lobby.sendMessage(chat.value);chat.value=""}catch(x){error(err,x)}};app.appendChild(screen);render(lobby.room)}
+function roulette(){clear();screen=document.createElement("section");screen.className="roulette-screen";screen.innerHTML=`<div class="roulette-card"><h2>ROLE ROULETTE</h2><div class="roulette-display" data-r>ESCAPEE</div></div>`;app.appendChild(screen);const history=JSON.parse(localStorage.getItem("rfl_roles")||"[]"),prev=history.at(-1),two=history.at(-2);let chance=.25;if(prev==="ESCAPEE")chance=.45;if(prev==="ESCAPEE"&&two==="ESCAPEE")chance=.8;if(prev==="PURSUER")chance=.15;if(prev==="PURSUER"&&two==="PURSUER")chance=0;const role=Math.random()<chance?"PURSUER":"ESCAPEE";localStorage.setItem("rfl_roles",JSON.stringify([...history,role].slice(-2)));let n=0;const el=screen.querySelector("[data-r]");const tick=()=>{el.textContent=n%2?"PURSUER":"ESCAPEE";el.dataset.role=el.textContent;if(++n<18)setTimeout(tick,70+n*12);else{el.textContent=role;setTimeout(()=>startGame(role),1100)}};tick()}
+function startGame(role){clear();game=new Game(app,{role,onExit:home,onRetry:()=>startGame(role)});game.start()}
+profile?home():landing();
