@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import { createEscapee, createPursuer, CharacterAnimator } from "./characters.js";
+import {
+    addCoins,
+    executeAdminCoinCommand,
+    getSelectedRank
+} from "./economy.js";
 
 const MATCH_TIME = 600;
 const PLAYER_HEIGHT = 1.72;
@@ -9,18 +14,21 @@ const REPAIR_TIME = 5;
 const CAMERA_MODES = ["FIRST", "SECOND", "THIRD"];
 const UP = new THREE.Vector3(0, 1, 0);
 
-const distanceXZ = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-const gameMaterial = (color, extra = {}) => new THREE.MeshStandardMaterial({
-    color,
-    roughness: 0.78,
-    metalness: 0.08,
-    ...extra
-});
+const distanceXZ = (first, second) =>
+    Math.hypot(first.x - second.x, first.z - second.z);
 
-function makeBox(name, size, position, color, customMaterial = null) {
+const createMaterial = (color, options = {}) =>
+    new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.78,
+        metalness: 0.08,
+        ...options
+    });
+
+function createBox(name, size, position, color, customMaterial = null) {
     const mesh = new THREE.Mesh(
         new THREE.BoxGeometry(...size),
-        customMaterial || gameMaterial(color)
+        customMaterial || createMaterial(color)
     );
     mesh.name = name;
     mesh.position.set(...position);
@@ -34,31 +42,46 @@ function getStoredProfile() {
             const value = JSON.parse(sessionStorage.getItem(key) || "null");
             if (value?.displayName) return value;
         } catch {
-            // Try the next known session key.
+            // Continue to the next known session key.
         }
     }
     return {
+        id: "local_guest",
         displayName: "Player",
+        loginId: null,
         role: "GUEST",
-        title: null
+        title: null,
+        guest: true
     };
 }
 
-function getChatIdentity(profile) {
-    if (profile.role === "ADMIN") return { label: "Admin", className: "admin" };
-    if (profile.role === "MODERATOR") return { label: "Mod", className: "moderator" };
-    if (profile.title === "LEGEND") return { label: "Legend", className: "legend" };
-    if (profile.role === "GUEST") return { label: "Guest", className: "guest" };
-    return { label: "Player", className: "player" };
+function createNpcProfile(npc) {
+    return {
+        id: npc.userData.entityId,
+        loginId: npc.userData.entityId,
+        displayName: npc.userData.name,
+        role: "PLAYER",
+        title: null,
+        npc: true
+    };
 }
 
 export class Game {
-    constructor(container, { role = "ESCAPEE", onExit, onRetry, profile } = {}) {
+    constructor(container, {
+        role = "ESCAPEE",
+        onExit,
+        onRetry,
+        profile,
+        profiles = [],
+        onCoinsChanged
+    } = {}) {
         this.container = container;
         this.role = role;
         this.onExit = onExit;
         this.onRetry = onRetry;
         this.profile = profile || getStoredProfile();
+        this.profiles = Array.isArray(profiles) ? profiles : [];
+        this.onCoinsChanged = onCoinsChanged;
 
         this.keys = new Set();
         this.escapees = [];
@@ -83,11 +106,11 @@ export class Game {
         this.repairProgress = 0;
         this.running = false;
         this.ended = false;
+        this.rewardGranted = false;
 
         this.chatOpen = false;
         this.chatMessages = [];
-        this.chatMaximum = 9;
-        this.lastChatAt = 0;
+        this.chatMaximum = 10;
 
         this.touch = { sprint: false, sneak: false, interact: false };
         this.joystick = { x: 0, y: 0, pointer: null };
@@ -105,12 +128,24 @@ export class Game {
         this.scene.background = new THREE.Color(0x071119);
         this.scene.fog = new THREE.Fog(0x071119, 22, 95);
 
-        this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.08, 240);
+        this.camera = new THREE.PerspectiveCamera(
+            72,
+            innerWidth / innerHeight,
+            0.08,
+            240
+        );
         this.camera.rotation.order = "YXZ";
 
-        this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        this.renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            powerPreference: "high-performance"
+        });
         this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight, false);
+        this.renderer.setSize(
+            this.container.clientWidth,
+            this.container.clientHeight,
+            false
+        );
         this.renderer.outputColorSpace = THREE.SRGBColorSpace;
         this.container.appendChild(this.renderer.domElement);
 
@@ -147,47 +182,79 @@ export class Game {
     }
 
     createFacility() {
-        const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), gameMaterial(0x222a2e));
+        const floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100),
+            createMaterial(0x222a2e)
+        );
         floor.rotation.x = -Math.PI / 2;
         this.scene.add(floor);
+
         const grid = new THREE.GridHelper(100, 50, 0x4b5f69, 0x343f45);
         grid.position.y = 0.01;
         this.scene.add(grid);
 
-        [[0,-49,98,1],[0,49,98,1],[-49,0,1,98],[49,0,1,98],[-25,-20,1,38],[-25,26,1,34],[25,-24,1,34],[25,25,1,38],[0,-12,28,1],[8,12,30,1],[-18,34,28,1],[-36,4,20,1],[36,2,20,1]].forEach(
-            ([x, z, width, depth]) => this.addWall(x, z, width, depth)
+        const wallData = [
+            [0, -49, 98, 1], [0, 49, 98, 1], [-49, 0, 1, 98], [49, 0, 1, 98],
+            [-25, -20, 1, 38], [-25, 26, 1, 34], [25, -24, 1, 34],
+            [25, 25, 1, 38], [0, -12, 28, 1], [8, 12, 30, 1],
+            [-18, 34, 28, 1], [-36, 4, 20, 1], [36, 2, 20, 1]
+        ];
+        wallData.forEach(([x, z, width, depth]) =>
+            this.addWall(x, z, width, depth)
         );
 
-        [[-36,-34],[-31,-34],[-36,-29],[35,33],[30,33],[35,28],[6,-27],[11,-27],[6,-22],[-8,22],[-3,22],[16,26],[21,26]].forEach(
-            ([x, z]) => this.addCrate(x, z)
-        );
+        const crateData = [
+            [-36, -34], [-31, -34], [-36, -29], [35, 33], [30, 33],
+            [35, 28], [6, -27], [11, -27], [6, -22], [-8, 22],
+            [-3, 22], [16, 26], [21, 26]
+        ];
+        crateData.forEach(([x, z]) => this.addCrate(x, z));
     }
 
     addWall(x, z, width, depth) {
-        const wall = makeBox("Wall", [width, 5, depth], [x, 2.5, z], 0x38444a);
+        const wall = createBox(
+            "Wall",
+            [width, 5, depth],
+            [x, 2.5, z],
+            0x38444a
+        );
         this.scene.add(wall);
         this.walls.push(wall);
     }
 
     addCrate(x, z) {
-        const crate = makeBox("Crate", [3.4, 2.6, 3.4], [x, 1.3, z], 0x655f49);
+        const crate = createBox(
+            "Crate",
+            [3.4, 2.6, 3.4],
+            [x, 1.3, z],
+            0x655f49
+        );
         this.scene.add(crate);
         this.obstacles.push(crate);
     }
 
     createObjectives() {
-        [[-38,0],[36,-30],[10,38]].forEach(([x, z], index) => {
+        [[-38, 0], [36, -30], [10, 38]].forEach(([x, z], index) => {
             const terminal = new THREE.Group();
             terminal.position.set(x, 0, z);
             terminal.name = `Terminal${index + 1}`;
-            const screenMaterial = gameMaterial(0x681f1f, {
+
+            const screenMaterial = createMaterial(0x681f1f, {
                 emissive: 0xff2020,
                 emissiveIntensity: 1.2
             });
+
             terminal.add(
-                makeBox("TerminalBody", [2, 2.4, 1.2], [0, 1.2, 0], 0x263239),
-                makeBox("TerminalScreen", [1.3, 0.75, 0.08], [0, 1.55, -0.64], 0, screenMaterial)
+                createBox("TerminalBody", [2, 2.4, 1.2], [0, 1.2, 0], 0x263239),
+                createBox(
+                    "TerminalScreen",
+                    [1.3, 0.75, 0.08],
+                    [0, 1.55, -0.64],
+                    0,
+                    screenMaterial
+                )
             );
+
             terminal.userData = {
                 repaired: false,
                 progress: 0,
@@ -200,18 +267,21 @@ export class Game {
 
         this.exitGate = new THREE.Group();
         this.exitGate.position.set(0, 0, -47.5);
-        const frame = gameMaterial(0x596871, { metalness: 0.5 });
+        const frame = createMaterial(0x596871, { metalness: 0.5 });
         this.exitGate.add(
-            makeBox("Frame", [1,5,1], [-3.5,2.5,0], 0, frame),
-            makeBox("Frame", [1,5,1], [3.5,2.5,0], 0, frame),
-            makeBox("Frame", [8,1,1], [0,4.5,0], 0, frame)
+            createBox("Frame", [1, 5, 1], [-3.5, 2.5, 0], 0, frame),
+            createBox("Frame", [1, 5, 1], [3.5, 2.5, 0], 0, frame),
+            createBox("Frame", [8, 1, 1], [0, 4.5, 0], 0, frame)
         );
-        const door = makeBox(
+        const door = createBox(
             "Door",
-            [6,4,0.5],
-            [0,2,0],
+            [6, 4, 0.5],
+            [0, 2, 0],
             0x5a1818,
-            gameMaterial(0x5a1818, { emissive: 0x9d1515, emissiveIntensity: 0.5 })
+            createMaterial(0x5a1818, {
+                emissive: 0x9d1515,
+                emissiveIntensity: 0.5
+            })
         );
         this.exitGate.add(door);
         this.exitGate.userData = { open: false, door };
@@ -233,7 +303,6 @@ export class Game {
             captured: false,
             escaped: false,
             health: 2,
-            speed: 0,
             stuckTime: 0,
             avoidanceSide: Math.random() < 0.5 ? -1 : 1,
             targetTerminal: null,
@@ -246,8 +315,8 @@ export class Game {
     }
 
     createCharacters() {
-        const escapeeSpawns = [[-8,36],[0,38],[8,36],[14,32]];
-        const colors = [0x3e8fd1,0x3fae72,0xb07bd8,0xd59a43];
+        const escapeeSpawns = [[-8, 36], [0, 38], [8, 36], [14, 32]];
+        const colors = [0x3e8fd1, 0x3fae72, 0xb07bd8, 0xd59a43];
         const names = ["NOVA-01", "NOVA-02", "NOVA-03", "NOVA-04"];
         const pursuerSpawn = [-40, -12];
 
@@ -257,11 +326,23 @@ export class Game {
             this.playerModel = createEscapee({ jacketColor: 0xd59a43 });
             escapeeSpawns.slice(0, 3).forEach((point, index) => {
                 this.escapees.push(
-                    this.createCharacter("ESCAPEE", point[0], point[1], colors[index], names[index])
+                    this.createCharacter(
+                        "ESCAPEE",
+                        point[0],
+                        point[1],
+                        colors[index],
+                        names[index]
+                    )
                 );
             });
             this.pursuers.push(
-                this.createCharacter("PURSUER", pursuerSpawn[0], pursuerSpawn[1], 0x15191c, "WARDEN")
+                this.createCharacter(
+                    "PURSUER",
+                    pursuerSpawn[0],
+                    pursuerSpawn[1],
+                    0x15191c,
+                    "WARDEN"
+                )
             );
         } else {
             this.playerPosition.set(pursuerSpawn[0], 0, pursuerSpawn[1]);
@@ -269,7 +350,13 @@ export class Game {
             this.playerModel = createPursuer();
             escapeeSpawns.forEach((point, index) => {
                 this.escapees.push(
-                    this.createCharacter("ESCAPEE", point[0], point[1], colors[index], names[index])
+                    this.createCharacter(
+                        "ESCAPEE",
+                        point[0],
+                        point[1],
+                        colors[index],
+                        names[index]
+                    )
                 );
             });
         }
@@ -363,20 +450,62 @@ export class Game {
         this.chatForm.hidden = true;
         this.chatRoot.classList.remove("game-chat--open");
         if (clearInput) this.chatInput.value = "";
-        this.renderer.domElement.focus?.();
+        this.renderer?.domElement.focus?.();
+    }
+
+    getCommandProfiles() {
+        const npcProfiles = [...this.escapees, ...this.pursuers].map(createNpcProfile);
+        const candidates = [this.profile, ...this.profiles, ...npcProfiles];
+        return candidates.filter((candidate, index, list) =>
+            list.findIndex(item => item.id === candidate.id) === index
+        );
     }
 
     submitPlayerChat() {
         const content = this.chatInput.value.trim().slice(0, 120);
-        if (content) {
-            const identity = getChatIdentity(this.profile);
-            this.addChatMessage({
-                label: identity.label,
-                className: identity.className,
-                displayName: this.profile.displayName,
-                content
-            });
+
+        if (!content) {
+            this.closeChat(true);
+            return;
         }
+
+        const isCoinCommand =
+            /^\/(?:coin\s+give|give\s+coin)\s+/i.test(content);
+
+        if (isCoinCommand) {
+            try {
+                const result = executeAdminCoinCommand({
+                    executor: this.profile,
+                    command: content,
+                    profiles: this.getCommandProfiles()
+                });
+                this.addSystemMessage(result.message);
+                this.onCoinsChanged?.(result);
+            } catch (exception) {
+                this.addSystemMessage(exception?.message || String(exception));
+            }
+            this.closeChat(true);
+            return;
+        }
+
+        let identity;
+        if (this.profile.role === "ADMIN") {
+            identity = { label: "Admin", className: "admin" };
+        } else if (this.profile.role === "MODERATOR") {
+            identity = { label: "Mod", className: "moderator" };
+        } else if (this.profile.role === "GUEST") {
+            identity = { label: "Guest", className: "guest" };
+        } else {
+            const selected = getSelectedRank(this.profile);
+            identity = { label: selected.label, className: selected.className };
+        }
+
+        this.addChatMessage({
+            label: identity.label,
+            className: identity.className,
+            displayName: this.profile.displayName,
+            content
+        });
         this.closeChat(true);
     }
 
@@ -418,10 +547,10 @@ export class Game {
             identity.textContent = message.displayName
                 ? `[${message.label}] ${message.displayName}:`
                 : `[${message.label}]`;
-            const content = document.createElement("span");
-            content.className = "game-chat__content";
-            content.textContent = ` ${message.content}`;
-            line.append(identity, content);
+            const body = document.createElement("span");
+            body.className = "game-chat__content";
+            body.textContent = ` ${message.content}`;
+            line.append(identity, body);
             return line;
         }));
         this.chatLog.scrollTop = this.chatLog.scrollHeight;
@@ -470,7 +599,7 @@ export class Game {
 
         const zone = root.querySelector("[data-zone]");
         const knob = root.querySelector("[data-knob]");
-        const moveStick = event => {
+        const updateStick = event => {
             if (event.pointerId !== this.joystick.pointer || this.chatOpen) return;
             const bounds = zone.getBoundingClientRect();
             let x = event.clientX - (bounds.left + bounds.width / 2);
@@ -489,21 +618,21 @@ export class Game {
             if (this.chatOpen) return;
             this.joystick.pointer = event.pointerId;
             zone.setPointerCapture?.(event.pointerId);
-            moveStick(event);
+            updateStick(event);
         });
-        zone.addEventListener("pointermove", moveStick);
+        zone.addEventListener("pointermove", updateStick);
         zone.addEventListener("pointerup", () => {
             this.joystick = { x: 0, y: 0, pointer: null };
             knob.style.transform = "translate(0, 0)";
         });
 
         const bindHold = (selector, key) => {
-            const button = root.querySelector(selector);
-            button.onpointerdown = event => {
+            const control = root.querySelector(selector);
+            control.onpointerdown = event => {
                 event.preventDefault();
                 if (!this.chatOpen) this.touch[key] = true;
             };
-            button.onpointerup = button.onpointercancel = () => {
+            control.onpointerup = control.onpointercancel = () => {
                 this.touch[key] = false;
             };
         };
@@ -533,28 +662,23 @@ export class Game {
 
     keyDown(event) {
         if (this.chatOpen) return;
-
         if (event.code === "KeyT" && !event.repeat) {
             event.preventDefault();
             this.openChat();
             return;
         }
-
         if (event.code === "Escape") {
             this.stop();
             this.onExit?.();
             return;
         }
-
         if (event.code === "KeyC" && !event.repeat) {
             this.cycleCameraMode();
             return;
         }
-
         if (event.code === "Space" && this.role === "PURSUER") {
             this.tryCapture();
         }
-
         this.keys.add(event.code);
     }
 
@@ -578,12 +702,11 @@ export class Game {
         this.cameraModeIndex = (this.cameraModeIndex + 1) % CAMERA_MODES.length;
         this.cameraMode = CAMERA_MODES[this.cameraModeIndex];
         this.ui.view.textContent = this.cameraMode;
-        this.ui.viewToast.textContent =
-            this.cameraMode === "FIRST"
-                ? "FIRST PERSON"
-                : this.cameraMode === "SECOND"
-                    ? "SECOND PERSON"
-                    : "THIRD PERSON";
+        this.ui.viewToast.textContent = this.cameraMode === "FIRST"
+            ? "FIRST PERSON"
+            : this.cameraMode === "SECOND"
+                ? "SECOND PERSON"
+                : "THIRD PERSON";
         this.ui.viewToast.classList.add("visible");
         clearTimeout(this.viewToastTimer);
         this.viewToastTimer = setTimeout(
@@ -661,18 +784,16 @@ export class Game {
 
         const nextX = this.playerPosition.x + movement.x * speed * deltaTime;
         const nextZ = this.playerPosition.z + movement.z * speed * deltaTime;
-
         if (!this.collision(nextX, this.playerPosition.z)) this.playerPosition.x = nextX;
         if (!this.collision(this.playerPosition.x, nextZ)) this.playerPosition.z = nextZ;
 
         this.syncPlayerModel();
         this.playerAnimator?.update(deltaTime, {
-            state:
-                movement.lengthSq() < 0.001
-                    ? "IDLE"
-                    : sprinting
-                        ? "RUN"
-                        : "WALK"
+            state: movement.lengthSq() < 0.001
+                ? "IDLE"
+                : sprinting
+                    ? "RUN"
+                    : "WALK"
         });
     }
 
@@ -701,7 +822,6 @@ export class Game {
         const lookTarget = eye.clone();
         lookTarget.y -= 0.15;
         const desired = eye.clone();
-
         if (this.cameraMode === "SECOND") {
             desired.addScaledVector(forward, 4.6);
             desired.y += 0.55;
@@ -725,7 +845,6 @@ export class Game {
                 Math.max(0.7, hits[0].distance - 0.35)
             )
             : desired;
-
         this.camera.position.lerp(safe, 0.22);
         this.camera.lookAt(lookTarget);
     }
@@ -733,7 +852,7 @@ export class Game {
     chooseNpcDirection(npc, desiredDirection) {
         const radius = npc.userData.type === "PURSUER" ? 0.78 : 0.52;
         const side = npc.userData.avoidanceSide || 1;
-        const angles = [0,25*side,-25*side,50*side,-50*side,75*side,-75*side,110,-110,160,-160,180];
+        const angles = [0, 25 * side, -25 * side, 50 * side, -50 * side, 75 * side, -75 * side, 110, -110, 160, -160, 180];
 
         for (const angle of angles) {
             const candidate = desiredDirection
@@ -758,7 +877,16 @@ export class Game {
         if (desired.lengthSq() < 0.01) return;
         desired.normalize();
         const direction = this.chooseNpcDirection(npc, desired);
-        if (!direction) return;
+        if (!direction) {
+            npc.userData.stuckTime += deltaTime;
+            if (npc.userData.stuckTime > 0.7) {
+                npc.userData.avoidanceSide *= -1;
+                npc.rotation.y += Math.PI * 0.5;
+                npc.userData.stuckTime = 0;
+            }
+            return;
+        }
+        npc.userData.stuckTime = 0;
 
         const radius = npc.userData.type === "PURSUER" ? 0.78 : 0.52;
         const nextX = npc.position.x + direction.x * speed * deltaTime;
@@ -796,7 +924,10 @@ export class Game {
         }
         const available = this.terminals
             .filter(terminal => !terminal.userData.repaired)
-            .sort((a, b) => distanceXZ(npc.position, a.position) - distanceXZ(npc.position, b.position));
+            .sort((first, second) =>
+                distanceXZ(npc.position, first.position) -
+                distanceXZ(npc.position, second.position)
+            );
         const terminal = available.find(item =>
             !item.userData.assignedNpcId ||
             item.userData.assignedNpcId === npc.userData.entityId
@@ -869,14 +1000,19 @@ export class Game {
                 }))
         ];
         if (!candidates.length) return;
-        candidates.sort((a, b) =>
-            distanceXZ(npc.position, a.position) -
-            distanceXZ(npc.position, b.position)
+        candidates.sort((first, second) =>
+            distanceXZ(npc.position, first.position) -
+            distanceXZ(npc.position, second.position)
         );
         const target = candidates[0];
         const targetDistance = distanceXZ(npc.position, target.position);
         this.setNpcState(npc, targetDistance < 24 ? "CHASE" : "WALK");
-        this.moveNpc(npc, target.position, targetDistance < 24 ? 4.7 : 2.4, deltaTime);
+        this.moveNpc(
+            npc,
+            target.position,
+            targetDistance < 24 ? 4.7 : 2.4,
+            deltaTime
+        );
         npc.userData.animator.update(deltaTime, { state: npc.userData.state });
 
         if (targetDistance < 1.25) {
@@ -889,7 +1025,11 @@ export class Game {
                     this.captureEscapee(target.entity);
                 } else {
                     target.entity.position.addScaledVector(
-                        target.entity.position.clone().sub(npc.position).setY(0).normalize(),
+                        target.entity.position
+                            .clone()
+                            .sub(npc.position)
+                            .setY(0)
+                            .normalize(),
                         3
                     );
                 }
@@ -898,13 +1038,9 @@ export class Game {
     }
 
     updateNpcs(deltaTime) {
-        for (const escapee of this.escapees) {
-            this.updateEscapeeNpc(escapee, deltaTime);
-        }
+        this.escapees.forEach(escapee => this.updateEscapeeNpc(escapee, deltaTime));
         if (this.role === "ESCAPEE") {
-            for (const pursuer of this.pursuers) {
-                this.updatePursuerNpc(pursuer, deltaTime);
-            }
+            this.pursuers.forEach(pursuer => this.updatePursuerNpc(pursuer, deltaTime));
         }
     }
 
@@ -916,69 +1052,26 @@ export class Game {
         terminal.userData.screenMaterial.emissive.set(0x29ff82);
         terminal.userData.assignedNpcId = null;
         this.repaired += 1;
+
         if (npc) {
-            this.addNpcMessage(npc, `terminal-${this.repaired}`, "Terminal restored!", true);
+            this.addNpcMessage(
+                npc,
+                `terminal-${this.repaired}`,
+                "Terminal restored!",
+                true
+            );
         }
-        for (const escapee of this.escapees) {
+
+        this.escapees.forEach(escapee => {
             if (escapee.userData.targetTerminal === terminal) {
                 escapee.userData.targetTerminal = null;
             }
-        }
+        });
+
         if (this.repaired >= REQUIRED_TERMINALS) {
             this.exitGate.userData.open = true;
             this.exitGate.userData.door.visible = false;
             this.addSystemMessage("All terminals restored. The exit is open.");
-        }
-    }
-
-    captureEscapee(target) {
-        if (target.userData.captured) return;
-        target.userData.captured = true;
-        target.visible = false;
-        this.addSystemMessage(`${target.userData.name} was captured.`);
-        this.checkMatchEnd();
-    }
-
-    tryCapture() {
-        const target = this.escapees
-            .filter(npc => !npc.userData.captured && !npc.userData.escaped)
-            .sort((a, b) =>
-                distanceXZ(this.playerPosition, a.position) -
-                distanceXZ(this.playerPosition, b.position)
-            )[0];
-        if (target && distanceXZ(this.playerPosition, target.position) < 2.2) {
-            target.userData.health -= 1;
-            this.addChatMessage({
-                label: "Pursuer",
-                className: "pursuer",
-                displayName: this.profile.displayName,
-                content: target.userData.health <= 0
-                    ? "Captured."
-                    : "You cannot escape."
-            });
-            if (target.userData.health <= 0) {
-                this.captureEscapee(target);
-            }
-        }
-    }
-
-    checkMatchEnd() {
-        if (this.ended) return;
-        const remaining = this.escapees.filter(escapee =>
-            !escapee.userData.captured &&
-            !escapee.userData.escaped
-        );
-        const captured = this.escapees.filter(escapee =>
-            escapee.userData.captured
-        ).length;
-
-        if (this.role === "PURSUER" && remaining.length === 0) {
-            if (captured === this.escapees.length) {
-                this.addSystemMessage("All escapees have been captured.");
-                this.end("PURSUER WIN");
-            } else {
-                this.end("MATCH OVER");
-            }
         }
     }
 
@@ -987,15 +1080,19 @@ export class Game {
         const interacting = this.keys.has("KeyE") || this.touch.interact;
         const terminal = this.terminals
             .filter(item => !item.userData.repaired)
-            .sort((a, b) =>
-                distanceXZ(this.playerPosition, a.position) -
-                distanceXZ(this.playerPosition, b.position)
+            .sort((first, second) =>
+                distanceXZ(this.playerPosition, first.position) -
+                distanceXZ(this.playerPosition, second.position)
             )[0];
+
         this.ui.prompt.classList.remove("visible");
 
         if (terminal && distanceXZ(this.playerPosition, terminal.position) < 3.4) {
             this.ui.prompt.textContent = interacting
-                ? `RESTORING ${Math.min(100, Math.round(this.repairProgress / REPAIR_TIME * 100))}%`
+                ? `RESTORING ${Math.min(
+                    100,
+                    Math.round(this.repairProgress / REPAIR_TIME * 100)
+                )}%`
                 : "HOLD E / USE TO RESTORE";
             this.ui.prompt.classList.add("visible");
             if (interacting) {
@@ -1020,6 +1117,82 @@ export class Game {
         }
     }
 
+    captureEscapee(target) {
+        if (target.userData.captured) return;
+        target.userData.captured = true;
+        target.visible = false;
+        this.addSystemMessage(`${target.userData.name} was captured.`);
+        this.checkMatchEnd();
+    }
+
+    tryCapture() {
+        const target = this.escapees
+            .filter(npc => !npc.userData.captured && !npc.userData.escaped)
+            .sort((first, second) =>
+                distanceXZ(this.playerPosition, first.position) -
+                distanceXZ(this.playerPosition, second.position)
+            )[0];
+
+        if (target && distanceXZ(this.playerPosition, target.position) < 2.2) {
+            target.userData.health -= 1;
+            this.addChatMessage({
+                label: "Pursuer",
+                className: "pursuer",
+                displayName: this.profile.displayName,
+                content: target.userData.health <= 0
+                    ? "Captured."
+                    : "You cannot escape."
+            });
+            if (target.userData.health <= 0) {
+                this.captureEscapee(target);
+            }
+        }
+    }
+
+    checkMatchEnd() {
+        if (this.ended) return;
+        const remaining = this.escapees.filter(escapee =>
+            !escapee.userData.captured && !escapee.userData.escaped
+        );
+        const captured = this.escapees.filter(escapee =>
+            escapee.userData.captured
+        ).length;
+
+        if (this.role === "PURSUER" && remaining.length === 0) {
+            if (captured === this.escapees.length) {
+                this.addSystemMessage("All escapees have been captured.");
+                this.end("PURSUER WIN");
+            } else {
+                this.end("MATCH OVER");
+            }
+        }
+    }
+
+    calculateReward(result) {
+        let reward = 25;
+        if (this.role === "ESCAPEE") {
+            reward += this.repaired * 100;
+            if (result === "ESCAPED") reward += 400;
+        } else {
+            const captured = this.escapees.filter(escapee =>
+                escapee.userData.captured
+            ).length;
+            reward += captured * 150;
+            if (result === "PURSUER WIN") reward += 500;
+        }
+        return Math.max(0, Math.floor(reward));
+    }
+
+    grantMatchReward(result) {
+        if (this.rewardGranted || this.profile.role === "GUEST") return 0;
+        this.rewardGranted = true;
+        const reward = this.calculateReward(result);
+        if (reward <= 0) return 0;
+        addCoins(this.profile, reward);
+        this.onCoinsChanged?.({ profile: this.profile, amount: reward, result });
+        return reward;
+    }
+
     updateHud() {
         const remainingTime = Math.max(0, MATCH_TIME - this.elapsed);
         this.ui.time.textContent =
@@ -1041,11 +1214,16 @@ export class Game {
         this.running = false;
         this.closeChat(false);
         document.exitPointerLock?.();
+        const reward = this.grantMatchReward(title);
+
         const overlay = document.createElement("section");
         overlay.className = "overlay";
         overlay.innerHTML = `
             <article class="overlay-card">
                 <h2>${title}</h2>
+                ${reward > 0
+                    ? `<p class="match-reward">+${reward.toLocaleString()} Coins</p>`
+                    : ""}
                 <div class="menu-actions">
                     <button class="menu-button menu-button--primary" data-retry>RETRY</button>
                     <button class="menu-button" data-menu>MENU</button>
@@ -1082,8 +1260,7 @@ export class Game {
     }
 
     resize() {
-        this.camera.aspect =
-            this.container.clientWidth / this.container.clientHeight;
+        this.camera.aspect = this.container.clientWidth / this.container.clientHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(
             this.container.clientWidth,
