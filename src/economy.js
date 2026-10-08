@@ -5,7 +5,7 @@ const ADMIN_LOG_KEY =
     "runForLiveAdminLogsV1";
 
 export const RANK_DRAW_PRICE =
-    15000;
+    25000;
 
 export const CHAMPION_PRICE =
     30000;
