@@ -185,7 +185,7 @@ export class Game{
     [['TUNNEL',-42,126,0x57cfff],['ROOFTOP',0,126,0xa8e85c],['CARGO',42,126,0xff9f32]].forEach(([name,x,z,color])=>{const route=new THREE.Group();route.position.set(x,0,z);route.add(box(name,[13,.3,12],[0,.15,0],color,mat(color,{emissive:color,emissiveIntensity:.45})));route.userData={name,active:false};this.scene.add(route);this.finalRoutes.push(route)});
   }
 
-  createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c),nextAttackAt:0,lastSafePosition:new THREE.Vector3(x,0,z),noMoveTime:0,aiRole:'SCOUT',decisionUntil:0,thoughtUntil:0,followPlayerUntil:0,targetClue:null,targetPoint:null,sharedClues:new Set()});this.scene.add(c);return c}
+  createCharacter(type,x,z,color,name){const c=type==="PURSUER"?createPursuer():createEscapee({jacketColor:color});c.position.set(x,0,z);Object.assign(c.userData,{entityId:crypto.randomUUID(),type,name,state:"IDLE",captured:false,escaped:false,health:2,stuckTime:0,avoidanceSide:Math.random()<.5?-1:1,targetTerminal:null,chatCooldownUntil:0,lastChatKey:"",animator:new CharacterAnimator(c),nextAttackAt:0,lastSafePosition:new THREE.Vector3(x,0,z),noMoveTime:0,aiRole:'SCOUT',decisionUntil:0,thoughtUntil:0,followPlayerUntil:0,targetClue:null,targetPoint:null,sharedClues:new Set(),navPath:[],navIndex:0,nextPathAt:0,lastPathTarget:new THREE.Vector3(),movementIntent:false});this.scene.add(c);return c}
   isSpawnClear(position,radius=2.4){
     if(this.collision(position.x,position.z,radius))return false;
     return [...this.escapees,...this.pursuers].every(npc=>distanceXZ(position,npc.position)>radius*2.2);
@@ -217,13 +217,13 @@ export class Game{
       const previous=entity.userData.previousRecoveryPosition||current.clone();
       const moved=distanceXZ(current,previous);
       entity.userData.previousRecoveryPosition=current.clone();
-      const wantsMove=entity.userData.state!=="IDLE";
+      const wantsMove=entity.userData.movementIntent===true;entity.userData.movementIntent=false;
       entity.userData.noMoveTime=wantsMove&&moved<.012?(entity.userData.noMoveTime||0)+dt:0;
       this.rememberSafePosition(entity,entity.userData.type==='PURSUER'?1:.75);
       if(entity.userData.noMoveTime>3.5){
         const safe=entity.userData.lastSafePosition;
         if(safe&&!this.collision(safe.x,safe.z,1)){entity.position.copy(safe)}
-        else entity.position.copy(this.findSafeSpawn([[0,24],[-70,20],[70,20],[0,62],[-32,104],[68,104]],2));
+        else{const around=[[entity.position.x+8,entity.position.z],[entity.position.x-8,entity.position.z],[entity.position.x,entity.position.z+8],[entity.position.x,entity.position.z-8],[0,24],[-70,20],[70,20],[0,62],[-32,104],[68,104]];entity.position.copy(this.findSafeSpawn(around,2));}
         entity.userData.noMoveTime=0;
       }
     }
@@ -518,9 +518,130 @@ export class Game{
   syncPlayerModel(){if(!this.playerModel)return;this.playerModel.position.copy(this.playerPosition);this.playerModel.rotation.y=this.yaw;this.playerModel.visible=this.cameraMode!=="FIRST"}
   updateCamera(){const eye=this.playerPosition.clone();eye.y+=PLAYER_HEIGHT;const forward=new THREE.Vector3(-Math.sin(this.yaw),0,-Math.cos(this.yaw));if(this.cameraMode==="FIRST"){this.camera.position.copy(eye);this.camera.rotation.set(this.pitch,this.yaw,0,"YXZ");return}const target=eye.clone();target.y-=.15;const desired=eye.clone();if(this.cameraMode==="SECOND"){desired.addScaledVector(forward,4.6);desired.y+=.55}else{desired.addScaledVector(forward,-5.7);desired.y+=1.5}const direction=desired.clone().sub(target),max=direction.length();direction.normalize();this.cameraRay.set(target,direction);this.cameraRay.far=max;const hits=this.cameraRay.intersectObjects([...this.walls,...this.obstacles],false),safe=hits.length?target.clone().addScaledVector(direction,Math.max(.7,hits[0].distance-.35)):desired;this.camera.position.lerp(safe,.22);this.camera.lookAt(target)}
 
+  hasClearPath(from,to,radius=.8){
+    const distance=distanceXZ(from,to);
+    const steps=Math.max(2,Math.ceil(distance/1.6));
+    for(let index=1;index<=steps;index+=1){
+      const ratio=index/steps;
+      const x=THREE.MathUtils.lerp(from.x,to.x,ratio);
+      const z=THREE.MathUtils.lerp(from.z,to.z,ratio);
+      if(this.collision(x,z,radius))return false;
+    }
+    return true;
+  }
+
+  worldToNav(position,cell=5){
+    return {x:Math.round(position.x/cell),z:Math.round(position.z/cell)};
+  }
+
+  navToWorld(node,cell=5){
+    return new THREE.Vector3(node.x*cell,0,node.z*cell);
+  }
+
+  findNavigationPath(from,to,radius=.8){
+    const cell=5;
+    const start=this.worldToNav(from,cell);
+    const goal=this.worldToNav(to,cell);
+    const key=node=>`${node.x},${node.z}`;
+    const queue=[start];
+    const cameFrom=new Map([[key(start),null]]);
+    const directions=[[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    let cursor=0;
+    let reached=null;
+
+    while(cursor<queue.length&&cursor<3200){
+      const current=queue[cursor++];
+      if(Math.abs(current.x-goal.x)<=1&&Math.abs(current.z-goal.z)<=1){reached=current;break}
+      const ordered=[...directions].sort((a,b)=>{
+        const da=Math.hypot(current.x+a[0]-goal.x,current.z+a[1]-goal.z);
+        const db=Math.hypot(current.x+b[0]-goal.x,current.z+b[1]-goal.z);
+        return da-db;
+      });
+      for(const [dx,dz] of ordered){
+        const next={x:current.x+dx,z:current.z+dz};
+        if(Math.abs(next.x*cell)>WORLD_HALF-3||Math.abs(next.z*cell)>WORLD_HALF-3)continue;
+        const nextKey=key(next);
+        if(cameFrom.has(nextKey))continue;
+        const world=this.navToWorld(next,cell);
+        if(this.collision(world.x,world.z,radius))continue;
+        if(dx&&dz){
+          const sideA=this.navToWorld({x:current.x+dx,z:current.z},cell);
+          const sideB=this.navToWorld({x:current.x,z:current.z+dz},cell);
+          if(this.collision(sideA.x,sideA.z,radius)||this.collision(sideB.x,sideB.z,radius))continue;
+        }
+        cameFrom.set(nextKey,current);
+        queue.push(next);
+      }
+    }
+
+    if(!reached)return [];
+    const reversed=[];
+    let current=reached;
+    while(current){reversed.push(this.navToWorld(current,cell));current=cameFrom.get(key(current))}
+    reversed.reverse();
+    reversed.push(to.clone());
+
+    const smoothed=[];
+    let index=0;
+    while(index<reversed.length){
+      let furthest=index;
+      for(let candidate=reversed.length-1;candidate>index;candidate-=1){
+        if(this.hasClearPath(reversed[index],reversed[candidate],radius)){furthest=candidate;break}
+      }
+      smoothed.push(reversed[furthest]);
+      index=furthest===index?index+1:furthest;
+    }
+    return smoothed;
+  }
+
+  navigationTarget(npc,target,radius){
+    const now=performance.now();
+    const targetMoved=distanceXZ(npc.userData.lastPathTarget,target)>5;
+    const direct=this.hasClearPath(npc.position,target,radius);
+    if(direct){
+      npc.userData.navPath=[];npc.userData.navIndex=0;
+      return target;
+    }
+    if(now>=npc.userData.nextPathAt||targetMoved||!npc.userData.navPath.length){
+      npc.userData.navPath=this.findNavigationPath(npc.position,target,radius);
+      npc.userData.navIndex=0;
+      npc.userData.nextPathAt=now+900+Math.random()*450;
+      npc.userData.lastPathTarget.copy(target);
+    }
+    const path=npc.userData.navPath;
+    while(npc.userData.navIndex<path.length-1&&distanceXZ(npc.position,path[npc.userData.navIndex])<1.7){npc.userData.navIndex+=1}
+    return path[npc.userData.navIndex]||target;
+  }
+
   chooseNpcDirection(npc,desired){const r=npc.userData.type==="PURSUER"?.78:.52,side=npc.userData.avoidanceSide||1;for(const angle of[0,25*side,-25*side,50*side,-50*side,75*side,-75*side,110,-110,160,-160,180]){const candidate=desired.clone().applyAxisAngle(UP,THREE.MathUtils.degToRad(angle));if(!this.collision(npc.position.x+candidate.x*1.3,npc.position.z+candidate.z*1.3,r)){if(angle!==0&&angle!==180)npc.userData.avoidanceSide=Math.sign(angle)||side;return candidate}}return null}
-  moveNpc(npc,target,speed,dt){const desired=target.clone().sub(npc.position).setY(0);if(desired.lengthSq()<.01)return;desired.normalize();const direction=this.chooseNpcDirection(npc,desired);if(!direction){npc.userData.stuckTime+=dt;if(npc.userData.stuckTime>.7){npc.userData.avoidanceSide*=-1;npc.userData.stuckTime=0}return}npc.userData.stuckTime=0;const r=npc.userData.type==="PURSUER"?.78:.52,x=npc.position.x+direction.x*speed*dt,z=npc.position.z+direction.z*speed*dt;if(!this.collision(x,npc.position.z,r))npc.position.x=x;if(!this.collision(npc.position.x,z,r))npc.position.z=z;const targetRotation=Math.atan2(direction.x,direction.z)+Math.PI,diff=THREE.MathUtils.euclideanModulo(targetRotation-npc.rotation.y+Math.PI,Math.PI*2)-Math.PI;npc.rotation.y+=diff*Math.min(1,dt*9)}
-  setNpcState(npc,state){if(npc.userData.state===state)return;npc.userData.state=state;if(state==="FLEE")this.addNpcMessage(npc,"flee","The pursuer is here!");else if(state==="REPAIR")this.addNpcMessage(npc,"repair","Repairing a terminal.");else if(state==="ESCAPE")this.addNpcMessage(npc,"exit","The exit is open. Move!");else if(state==="SEARCH")this.addNpcMessage(npc,"search","Searching this sector for clues.");else if(state==="TERMINAL")this.addNpcMessage(npc,"terminal-move","I have the digits. Moving to the terminal.");else if(state==="SUPPORT")this.addNpcMessage(npc,"support","I am staying with the team.");else if(state==="CHASE"&&npc.userData.type==="PURSUER")this.addNpcMessage(npc,"chase","I found you.")}
+  moveNpc(npc,target,speed,dt){
+    npc.userData.movementIntent=true;
+    const radius=npc.userData.type==='PURSUER'?.86:.62;
+    const steeringTarget=this.navigationTarget(npc,target,radius);
+    const desired=steeringTarget.clone().sub(npc.position).setY(0);
+    if(desired.lengthSq()<.01)return;
+    desired.normalize();
+    const direction=this.chooseNpcDirection(npc,desired);
+    if(!direction){
+      npc.userData.stuckTime+=dt;
+      if(npc.userData.stuckTime>.65){
+        npc.userData.navPath=[];npc.userData.navIndex=0;npc.userData.nextPathAt=0;
+        npc.userData.avoidanceSide*=-1;npc.userData.stuckTime=0;
+      }
+      return;
+    }
+    npc.userData.stuckTime=0;
+    const nextX=npc.position.x+direction.x*speed*dt;
+    const nextZ=npc.position.z+direction.z*speed*dt;
+    let moved=false;
+    if(!this.collision(nextX,npc.position.z,radius)){npc.position.x=nextX;moved=true}
+    if(!this.collision(npc.position.x,nextZ,radius)){npc.position.z=nextZ;moved=true}
+    if(!moved){npc.userData.navPath=[];npc.userData.nextPathAt=0}
+    const targetRotation=Math.atan2(direction.x,direction.z)+Math.PI;
+    const difference=THREE.MathUtils.euclideanModulo(targetRotation-npc.rotation.y+Math.PI,Math.PI*2)-Math.PI;
+    npc.rotation.y+=difference*Math.min(1,dt*9);
+  }
+  setNpcState(npc,state){if(npc.userData.state===state)return;npc.userData.state=state;if(state==="FLEE")this.addNpcMessage(npc,"flee","The pursuer is here!");else if(state==="REPAIR")this.addNpcMessage(npc,"repair","Repairing a terminal.");else if(state==="ESCAPE")this.addNpcMessage(npc,"exit","The exit is open. Move!");else if(state==="TERMINAL")this.addNpcMessage(npc,"terminal-move","I have the digits. Moving to the terminal.");else if(state==="SUPPORT")this.addNpcMessage(npc,"support","I am staying with the team.");else if(state==="CHASE"&&npc.userData.type==="PURSUER")this.addNpcMessage(npc,"chase","I found you.")}
   nearestPursuerTo(position){
     const candidates=this.role==='PURSUER'?[{position:this.playerPosition},...this.pursuers]:this.pursuers;
     return candidates.sort((a,b)=>distanceXZ(position,a.position)-distanceXZ(position,b.position))[0]||null;
@@ -687,7 +808,7 @@ export class Game{
       }
     }
   }
-  updateNpcs(dt){this.escapees.forEach(e=>this.updateEscapeeNpc(e,dt));if(this.role==="ESCAPEE")this.pursuers.forEach(p=>this.updatePursuerNpc(p,dt))}
+  updateNpcs(dt){this.escapees.forEach(e=>this.updateEscapeeNpc(e,dt));this.pursuers.forEach(p=>this.updatePursuerNpc(p,dt))}
   completeTerminal(terminal,npc=null){if(terminal.userData.repaired)return;terminal.userData.repaired=true;terminal.userData.progress=1;terminal.userData.screenMaterial.color.set(0x1f7848);terminal.userData.screenMaterial.emissive.set(0x29ff82);terminal.userData.assignedNpcId=null;this.repaired+=1;if(npc)this.addNpcMessage(npc,`terminal-${this.repaired}`,"Terminal restored!",true);this.escapees.forEach(e=>{if(e.userData.targetTerminal===terminal)e.userData.targetTerminal=null});if(this.repaired>=REQUIRED_TERMINALS){this.exitGate.userData.open=true;this.exitGate.userData.door.visible=false;this.addSystemMessage("All codes accepted. The final gate is open. Choose one of three routes.")}}
   nearestClue(){return this.clues.filter(c=>!c.userData.found).sort((a,b)=>distanceXZ(this.playerPosition,a.position)-distanceXZ(this.playerPosition,b.position))[0]||null}
   showTerminalModal(terminal){
