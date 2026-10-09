@@ -1,25 +1,919 @@
 import * as THREE from "three";
-import {HUB} from "../config.js";
-import { openModeMenu } from "../ui/mode-menu.js";
-import {board} from "../ui/board.js";
-import {LeaderboardService} from "../services/leaderboard.js";
-import {RoomService} from "../services/rooms.js";
-const M=(c,e={})=>new THREE.MeshStandardMaterial({color:c,roughness:.66,metalness:.2,...e});
-function sign(text,color){const c=document.createElement("canvas");c.width=1024;c.height=256;const x=c.getContext("2d");x.fillStyle="#040b11e8";x.fillRect(0,0,1024,256);x.strokeStyle=color;x.lineWidth=10;x.strokeRect(8,8,1008,240);x.fillStyle=color;x.font="900 108px system-ui";x.textAlign="center";x.textBaseline="middle";x.fillText(text,512,128);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;const s=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true}));s.scale.set(9,2.25,1);return s}
-export class Hub{
- constructor(container,{profile,onLogout}){Object.assign(this,{container,profile,onLogout});this.pos=new THREE.Vector3(0,0,16);this.yaw=Math.PI;this.pitch=0;this.keys=new Set();this.touch={x:0,y:0};this.mobile=matchMedia("(pointer:coarse)").matches;this.leaders=new LeaderboardService;this.rooms=new RoomService;this.animate=this.animate.bind(this);this.resize=this.resize.bind(this);this.mouse=this.mouse.bind(this)}
- start(){this.scene=new THREE.Scene;this.scene.background=new THREE.Color(0x04070b);this.scene.fog=new THREE.Fog(0x04070b,45,135);this.camera=new THREE.PerspectiveCamera(68,1,.08,HUB.far);this.camera.rotation.order="YXZ";this.renderer=new THREE.WebGLRenderer({antialias:!this.mobile,powerPreference:"high-performance"});this.renderer.setPixelRatio(Math.min(devicePixelRatio,this.mobile?1:1.5));this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.container.append(this.renderer.domElement);this.scene.add(new THREE.HemisphereLight(0x8ed9ff,0x090d13,1.6));const d=new THREE.DirectionalLight(0xffffff,1.2);d.position.set(12,26,8);this.scene.add(d);this.build();this.hud();this.controls();this.bind();this.resize();this.clock=new THREE.Clock;this.running=true;this.animate()}
- box(size,pos,color,extra={}){const m=new THREE.Mesh(new THREE.BoxGeometry(...size),M(color,extra));m.position.set(...pos);this.scene.add(m);return m}
- build(){const floor=new THREE.Mesh(new THREE.CircleGeometry(48,64),M(0x17242d));floor.rotation.x=-Math.PI/2;this.scene.add(floor);const roof=new THREE.Mesh(new THREE.CylinderGeometry(47,47,.8,64),M(0x0b1118));roof.position.y=13;this.scene.add(roof);for(let i=0;i<24;i++){const a=i/24*Math.PI*2;this.box([1.2,12,1.2],[Math.cos(a)*45,6,Math.sin(a)*45],0x243b48)}const title=sign("RUN FOR LIVE","#62d8ff");title.position.set(0,8,0);this.scene.add(title);this.portals=[this.portal("PLAY",0,-30,0x28cfff),this.portal("LEADERBOARD",-30,0,0xffc84d),this.portal("STORE",30,0,0xa47cff),this.portal("PROFILE",0,30,0x62e59a)];for(let i=0;i<12;i++){const a=i/12*Math.PI*2,l=new THREE.PointLight(i%2?0x32cfff:0x8f6cff,1.4,20,2);l.position.set(Math.cos(a)*30,7,Math.sin(a)*30);this.scene.add(l)}}
- portal(id,x,z,color){const g=new THREE.Group;g.position.set(x,0,z);const pad=new THREE.Mesh(new THREE.CylinderGeometry(5,5.4,.5,28),M(color,{emissive:color,emissiveIntensity:.34}));pad.position.y=.25;g.add(pad);for(const px of[-4,4]){const p=new THREE.Mesh(new THREE.BoxGeometry(.8,6,.8),M(0x344c59));p.position.set(px,3,0);g.add(p)}const top=new THREE.Mesh(new THREE.BoxGeometry(8.8,.8,.8),M(color,{emissive:color,emissiveIntensity:.8}));top.position.y=5.7;g.add(top);const s=sign(id,`#${color.toString(16).padStart(6,"0")}`);s.position.y=7.2;g.add(s);g.userData={id,label:id};this.scene.add(g);return g}
- hud(){this.ui=document.createElement("section");this.ui.className="hud";this.ui.innerHTML=`<div class="identity">[${this.profile.role==="ADMIN"?"Admin":this.profile.role==="MODERATOR"?"Mod":this.profile.selectedRank||"Player"}] <b>${this.profile.displayName}</b></div><div class="status">${this.profile.guest?"GUEST MODE":"ONLINE"}</div><div class="prompt" data-prompt></div><button class="logout">LOG OUT</button>`;document.body.append(this.ui);this.prompt=this.ui.querySelector("[data-prompt]");this.ui.querySelector(".logout").onclick=this.onLogout}
- controls(){if(!this.mobile)return;this.tc=document.createElement("div");this.tc.innerHTML=`<div class="look"></div><div class="stick"><i></i></div><button class="use">USE</button>`;document.body.append(this.tc);const look=this.tc.querySelector(".look"),stick=this.tc.querySelector(".stick"),knob=stick.querySelector("i");look.onpointerdown=e=>{this.lp=e.pointerId;this.lx=e.clientX;this.ly=e.clientY;look.setPointerCapture?.(e.pointerId)};look.onpointermove=e=>{if(e.pointerId!==this.lp)return;this.yaw-=(e.clientX-this.lx)*.006;this.pitch=THREE.MathUtils.clamp(this.pitch-(e.clientY-this.ly)*.006,-1.05,1.05);this.lx=e.clientX;this.ly=e.clientY};look.onpointerup=look.onpointercancel=e=>{if(e.pointerId===this.lp)this.lp=null};const move=e=>{if(e.pointerId!==this.sp)return;const r=stick.getBoundingClientRect();let x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,l=Math.hypot(x,y),m=42;if(l>m){x=x/l*m;y=y/l*m}this.touch={x:x/m,y:y/m};knob.style.transform=`translate(${x}px,${y}px)`};stick.onpointerdown=e=>{this.sp=e.pointerId;stick.setPointerCapture?.(e.pointerId);move(e)};stick.onpointermove=move;stick.onpointerup=stick.onpointercancel=e=>{if(e.pointerId!==this.sp)return;this.sp=null;this.touch={x:0,y:0};knob.style.transform="translate(0,0)"};this.tc.querySelector(".use").onclick=()=>this.use()}
- bind(){this.down=e=>{this.keys.add(e.code);if(e.code==="KeyE"&&!e.repeat)this.use()};this.up=e=>this.keys.delete(e.code);addEventListener("keydown",this.down);addEventListener("keyup",this.up);addEventListener("mousemove",this.mouse);addEventListener("resize",this.resize);this.renderer.domElement.onclick=()=>{if(!this.mobile)this.renderer.domElement.requestPointerLock?.()}}
- mouse(e){if(document.pointerLockElement!==this.renderer.domElement)return;this.yaw-=e.movementX*.0022;this.pitch=THREE.MathUtils.clamp(this.pitch-e.movementY*.0022,-1.05,1.05)}
- near(){return [...this.portals].sort((a,b)=>a.position.distanceTo(this.pos)-b.position.distanceTo(this.pos))[0]}
- use(){const p=this.near();if(!p||p.position.distanceTo(this.pos)>HUB.interact+1)return;if(p.userData.id==="PLAY")openModeMenu({create:()=>this.rooms.create(this.profile),join:c=>this.rooms.join(this.profile,c),solo:()=>alert("Solo match is the next module.")});else if(p.userData.id==="LEADERBOARD")board(this.leaders,this.profile);else alert(`${p.userData.label} opens in the next module.`)}
- update(dt){let f=Number(this.keys.has("KeyW"))-Number(this.keys.has("KeyS"))-this.touch.y,s=Number(this.keys.has("KeyD"))-Number(this.keys.has("KeyA"))+this.touch.x,l=Math.hypot(f,s);if(l>1){f/=l;s/=l}const speed=(this.keys.has("ShiftLeft")?HUB.run:HUB.walk),dx=(-Math.sin(this.yaw)*f+Math.cos(this.yaw)*s)*speed*dt,dz=(-Math.cos(this.yaw)*f-Math.sin(this.yaw)*s)*speed*dt,nx=this.pos.x+dx,nz=this.pos.z+dz;if(Math.hypot(nx,nz)<43)this.pos.set(nx,0,nz);this.camera.position.set(this.pos.x,1.72,this.pos.z);this.camera.rotation.set(this.pitch,this.yaw,0);const p=this.near(),ok=p&&p.position.distanceTo(this.pos)<=HUB.interact+1;this.prompt.textContent=ok?`${this.mobile?"TAP USE":"PRESS E"} Â· ${p.userData.label}`:"";this.prompt.classList.toggle("show",!!ok)}
- animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);this.update(Math.min(this.clock.getDelta(),.05));this.renderer.render(this.scene,this.camera)}
- resize(){const w=this.container.clientWidth||innerWidth,h=this.container.clientHeight||innerHeight;this.camera.aspect=w/h;this.camera.updateProjectionMatrix();this.renderer.setSize(w,h,false)}
- stop(){this.running=false;cancelAnimationFrame(this.frame);removeEventListener("keydown",this.down);removeEventListener("keyup",this.up);removeEventListener("mousemove",this.mouse);removeEventListener("resize",this.resize);this.ui?.remove();this.tc?.remove();this.renderer?.dispose();this.renderer?.domElement.remove()}
+
+import {
+    HUB_CONFIG
+} from "../config.js";
+
+import {
+    buildHub
+} from "./hub-map.js";
+
+import {
+    LobbyService
+} from "../services/lobby-service.js";
+
+import {
+    LeaderboardService
+} from "../services/leaderboard-service.js";
+
+import {
+    openModeMenu
+} from "../ui/mode-menu.js";
+
+import {
+    createLeaderboardUi
+} from "../ui/leaderboard-ui.js";
+
+import {
+    rankForProfile
+} from "../services/economy-service.js";
+
+export class Hub {
+    constructor(
+        container,
+        {
+            profile,
+            onSignOut,
+            onLogout
+        }
+    ) {
+        this.container =
+            container;
+
+        this.profile =
+            profile;
+
+        this.onSignOut =
+            onSignOut ||
+            onLogout;
+
+        this.position =
+            new THREE.Vector3(
+                0,
+                0,
+                17
+            );
+
+        this.yaw =
+            Math.PI;
+
+        this.pitch =
+            0;
+
+        this.keys =
+            new Set();
+
+        this.touchMove = {
+            x:
+                0,
+
+            y:
+                0
+        };
+
+        this.mobile =
+            matchMedia(
+                "(pointer: coarse)"
+            ).matches;
+
+        this.lobby =
+            new LobbyService(
+                profile
+            );
+
+        this.leaderboards =
+            new LeaderboardService();
+
+        this.animate =
+            this.animate.bind(
+                this
+            );
+
+        this.resize =
+            this.resize.bind(
+                this
+            );
+    }
+
+    async start() {
+        this.scene =
+            new THREE.Scene();
+
+        this.scene.background =
+            new THREE.Color(
+                0x05080d
+            );
+
+        this.scene.fog =
+            new THREE.Fog(
+                0x05080d,
+                42,
+                125
+            );
+
+        this.camera =
+            new THREE
+                .PerspectiveCamera(
+                    68,
+                    1,
+                    0.08,
+                    HUB_CONFIG.farPlane
+                );
+
+        this.camera.rotation.order =
+            "YXZ";
+
+        this.renderer =
+            new THREE.WebGLRenderer({
+                antialias:
+                    !this.mobile,
+
+                powerPreference:
+                    "high-performance"
+            });
+
+        this.renderer
+            .setPixelRatio(
+                Math.min(
+                    devicePixelRatio,
+                    this.mobile
+                        ? HUB_CONFIG
+                            .mobileMaxPixelRatio
+                        : HUB_CONFIG
+                            .maxPixelRatio
+                )
+            );
+
+        this.renderer.outputColorSpace =
+            THREE.SRGBColorSpace;
+
+        this.container.appendChild(
+            this.renderer.domElement
+        );
+
+        this.scene.add(
+            new THREE
+                .HemisphereLight(
+                    0x91d9ff,
+                    0x091017,
+                    1.55
+                )
+        );
+
+        const light =
+            new THREE
+                .DirectionalLight(
+                    0xffffff,
+                    1.3
+                );
+
+        light.position.set(
+            18,
+            32,
+            12
+        );
+
+        this.scene.add(
+            light
+        );
+
+        const hubData =
+            buildHub(
+                this.scene
+            );
+
+        this.portals =
+            hubData.portals;
+
+        this.obstacles =
+            hubData.obstacles;
+
+        this.createHud();
+        this.createTouchControls();
+        this.bindEvents();
+        this.resize();
+
+        if (
+            !this.profile.guest
+        ) {
+            await this.lobby
+                .connect();
+        }
+
+        this.clock =
+            new THREE.Clock();
+
+        this.running =
+            true;
+
+        this.animate();
+    }
+
+    createHud() {
+        const rank =
+            rankForProfile(
+                this.profile
+            );
+
+        this.hud =
+            document.createElement(
+                "section"
+            );
+
+        this.hud.className =
+            "hub-hud";
+
+        this.hud.innerHTML = `
+            <div class="profile-chip">
+                <span class="rank rank--${rank.className}">
+                    [${rank.label}]
+                </span>
+
+                <b>
+                    ${this.profile.displayName}
+                </b>
+            </div>
+
+            <div class="online-count">
+                ${
+                    this.profile.guest
+                        ? "GUEST MODE"
+                        : "ONLINE"
+                }
+            </div>
+
+            <div
+                class="hub-prompt"
+                data-prompt
+            ></div>
+
+            <button
+                class="logout-button"
+                type="button"
+            >
+                LOG OUT
+            </button>
+        `;
+
+        document.body.appendChild(
+            this.hud
+        );
+
+        this.prompt =
+            this.hud.querySelector(
+                "[data-prompt]"
+            );
+
+        this.hud
+            .querySelector(
+                ".logout-button"
+            )
+            .addEventListener(
+                "click",
+                () =>
+                    this.onSignOut?.()
+            );
+    }
+
+    createTouchControls() {
+        if (
+            !this.mobile
+        ) {
+            return;
+        }
+
+        this.touchControls =
+            document.createElement(
+                "div"
+            );
+
+        this.touchControls.innerHTML = `
+            <div class="touch-look-zone"></div>
+
+            <div class="touch-stick">
+                <div class="touch-stick__knob"></div>
+            </div>
+
+            <button class="touch-use">
+                USE
+            </button>
+        `;
+
+        document.body.appendChild(
+            this.touchControls
+        );
+
+        const look =
+            this.touchControls
+                .querySelector(
+                    ".touch-look-zone"
+                );
+
+        const stick =
+            this.touchControls
+                .querySelector(
+                    ".touch-stick"
+                );
+
+        const knob =
+            this.touchControls
+                .querySelector(
+                    ".touch-stick__knob"
+                );
+
+        look.addEventListener(
+            "pointerdown",
+            event => {
+                this.lookPointer =
+                    event.pointerId;
+
+                this.lastLookX =
+                    event.clientX;
+
+                this.lastLookY =
+                    event.clientY;
+            }
+        );
+
+        look.addEventListener(
+            "pointermove",
+            event => {
+                if (
+                    event.pointerId !==
+                    this.lookPointer
+                ) {
+                    return;
+                }
+
+                this.yaw -=
+                    (
+                        event.clientX -
+                        this.lastLookX
+                    ) *
+                    0.006;
+
+                this.pitch =
+                    THREE.MathUtils.clamp(
+                        this.pitch -
+                            (
+                                event.clientY -
+                                this.lastLookY
+                            ) *
+                            0.006,
+
+                        -1.05,
+                        1.05
+                    );
+
+                this.lastLookX =
+                    event.clientX;
+
+                this.lastLookY =
+                    event.clientY;
+            }
+        );
+
+        const stopLooking =
+            event => {
+                if (
+                    event.pointerId ===
+                    this.lookPointer
+                ) {
+                    this.lookPointer =
+                        null;
+                }
+            };
+
+        look.addEventListener(
+            "pointerup",
+            stopLooking
+        );
+
+        look.addEventListener(
+            "pointercancel",
+            stopLooking
+        );
+
+        const moveStick =
+            event => {
+                if (
+                    event.pointerId !==
+                    this.stickPointer
+                ) {
+                    return;
+                }
+
+                const bounds =
+                    stick
+                        .getBoundingClientRect();
+
+                let x =
+                    event.clientX -
+                    bounds.left -
+                    bounds.width / 2;
+
+                let y =
+                    event.clientY -
+                    bounds.top -
+                    bounds.height / 2;
+
+                const maximum =
+                    42;
+
+                const length =
+                    Math.hypot(
+                        x,
+                        y
+                    );
+
+                if (
+                    length >
+                    maximum
+                ) {
+                    x =
+                        x /
+                        length *
+                        maximum;
+
+                    y =
+                        y /
+                        length *
+                        maximum;
+                }
+
+                this.touchMove = {
+                    x:
+                        x /
+                        maximum,
+
+                    y:
+                        y /
+                        maximum
+                };
+
+                knob.style.transform =
+                    `translate(${x}px, ${y}px)`;
+            };
+
+        stick.addEventListener(
+            "pointerdown",
+            event => {
+                this.stickPointer =
+                    event.pointerId;
+
+                moveStick(
+                    event
+                );
+            }
+        );
+
+        stick.addEventListener(
+            "pointermove",
+            moveStick
+        );
+
+        const stopMoving =
+            event => {
+                if (
+                    event.pointerId !==
+                    this.stickPointer
+                ) {
+                    return;
+                }
+
+                this.stickPointer =
+                    null;
+
+                this.touchMove = {
+                    x:
+                        0,
+
+                    y:
+                        0
+                };
+
+                knob.style.transform =
+                    "translate(0, 0)";
+            };
+
+        stick.addEventListener(
+            "pointerup",
+            stopMoving
+        );
+
+        stick.addEventListener(
+            "pointercancel",
+            stopMoving
+        );
+
+        this.touchControls
+            .querySelector(
+                ".touch-use"
+            )
+            .addEventListener(
+                "click",
+                () =>
+                    this.interact()
+            );
+    }
+
+    bindEvents() {
+        this.keyDown =
+            event => {
+                this.keys.add(
+                    event.code
+                );
+
+                if (
+                    event.code ===
+                        "KeyE" &&
+                    !event.repeat
+                ) {
+                    this.interact();
+                }
+            };
+
+        this.keyUp =
+            event => {
+                this.keys.delete(
+                    event.code
+                );
+            };
+
+        this.mouseMove =
+            event => {
+                if (
+                    document.pointerLockElement !==
+                    this.renderer.domElement
+                ) {
+                    return;
+                }
+
+                this.yaw -=
+                    event.movementX *
+                    0.0022;
+
+                this.pitch =
+                    THREE.MathUtils.clamp(
+                        this.pitch -
+                        event.movementY *
+                        0.0022,
+
+                        -1.05,
+                        1.05
+                    );
+            };
+
+        addEventListener(
+            "keydown",
+            this.keyDown
+        );
+
+        addEventListener(
+            "keyup",
+            this.keyUp
+        );
+
+        addEventListener(
+            "mousemove",
+            this.mouseMove
+        );
+
+        addEventListener(
+            "resize",
+            this.resize
+        );
+
+        this.renderer
+            .domElement
+            .addEventListener(
+                "click",
+                () => {
+                    if (
+                        !this.mobile
+                    ) {
+                        this.renderer
+                            .domElement
+                            .requestPointerLock?.();
+                    }
+                }
+            );
+    }
+
+    nearestPortal() {
+        return [
+            ...this.portals
+        ].sort(
+            (
+                first,
+                second
+            ) =>
+                first.position
+                    .distanceTo(
+                        this.position
+                    ) -
+                second.position
+                    .distanceTo(
+                        this.position
+                    )
+        )[0];
+    }
+
+    interact() {
+        const portal =
+            this.nearestPortal();
+
+        if (
+            !portal ||
+            portal.position
+                .distanceTo(
+                    this.position
+                ) >
+                HUB_CONFIG
+                    .interactionDistance +
+                1
+        ) {
+            return;
+        }
+
+        if (
+            portal.id ===
+            "PLAY"
+        ) {
+            openModeMenu({
+                onSelect:
+                    mode => {
+                        console.log(
+                            mode
+                        );
+                    }
+            });
+
+            return;
+        }
+
+        if (
+            portal.id ===
+            "LEADERBOARD"
+        ) {
+            createLeaderboardUi({
+                service:
+                    this.leaderboards,
+
+                profile:
+                    this.profile
+            });
+
+            return;
+        }
+
+        alert(
+            `${portal.label} is coming next.`
+        );
+    }
+
+    update(
+        deltaTime
+    ) {
+        let forward =
+            Number(
+                this.keys.has(
+                    "KeyW"
+                )
+            ) -
+            Number(
+                this.keys.has(
+                    "KeyS"
+                )
+            ) -
+            this.touchMove.y;
+
+        let side =
+            Number(
+                this.keys.has(
+                    "KeyD"
+                )
+            ) -
+            Number(
+                this.keys.has(
+                    "KeyA"
+                )
+            ) +
+            this.touchMove.x;
+
+        const length =
+            Math.hypot(
+                forward,
+                side
+            );
+
+        if (
+            length >
+            1
+        ) {
+            forward /=
+                length;
+
+            side /=
+                length;
+        }
+
+        const sprint =
+            this.keys.has(
+                "ShiftLeft"
+            ) ||
+            this.keys.has(
+                "ShiftRight"
+            );
+
+        const speed =
+            sprint
+                ? HUB_CONFIG
+                    .sprintSpeed
+                : HUB_CONFIG
+                    .movementSpeed;
+
+        const nextX =
+            this.position.x +
+            (
+                -Math.sin(
+                    this.yaw
+                ) *
+                    forward +
+
+                Math.cos(
+                    this.yaw
+                ) *
+                    side
+            ) *
+            speed *
+            deltaTime;
+
+        const nextZ =
+            this.position.z +
+            (
+                -Math.cos(
+                    this.yaw
+                ) *
+                    forward -
+
+                Math.sin(
+                    this.yaw
+                ) *
+                    side
+            ) *
+            speed *
+            deltaTime;
+
+        if (
+            Math.hypot(
+                nextX,
+                nextZ
+            ) <
+            40
+        ) {
+            this.position.set(
+                nextX,
+                0,
+                nextZ
+            );
+        }
+
+        this.camera.position.set(
+            this.position.x,
+            1.72,
+            this.position.z
+        );
+
+        this.camera.rotation.set(
+            this.pitch,
+            this.yaw,
+            0,
+            "YXZ"
+        );
+
+        const portal =
+            this.nearestPortal();
+
+        const nearby =
+            portal &&
+            portal.position
+                .distanceTo(
+                    this.position
+                ) <=
+                HUB_CONFIG
+                    .interactionDistance +
+                1;
+
+        this.prompt.textContent =
+            nearby
+                ? `${
+                    this.mobile
+                        ? "TAP USE"
+                        : "PRESS E"
+                } · ${portal.label}`
+                : "";
+
+        this.prompt.classList.toggle(
+            "visible",
+            Boolean(nearby)
+        );
+    }
+
+    animate() {
+        if (
+            !this.running
+        ) {
+            return;
+        }
+
+        this.animationFrame =
+            requestAnimationFrame(
+                this.animate
+            );
+
+        this.update(
+            Math.min(
+                this.clock.getDelta(),
+                0.05
+            )
+        );
+
+        this.renderer.render(
+            this.scene,
+            this.camera
+        );
+    }
+
+    resize() {
+        if (
+            !this.camera
+        ) {
+            return;
+        }
+
+        const width =
+            this.container
+                .clientWidth ||
+            innerWidth;
+
+        const height =
+            this.container
+                .clientHeight ||
+            innerHeight;
+
+        this.camera.aspect =
+            width /
+            height;
+
+        this.camera
+            .updateProjectionMatrix();
+
+        this.renderer.setSize(
+            width,
+            height,
+            false
+        );
+    }
+
+    async stop() {
+        this.running =
+            false;
+
+        cancelAnimationFrame(
+            this.animationFrame
+        );
+
+        removeEventListener(
+            "keydown",
+            this.keyDown
+        );
+
+        removeEventListener(
+            "keyup",
+            this.keyUp
+        );
+
+        removeEventListener(
+            "mousemove",
+            this.mouseMove
+        );
+
+        removeEventListener(
+            "resize",
+            this.resize
+        );
+
+        await this.lobby
+            .disconnect();
+
+        this.hud?.remove();
+        this.touchControls?.remove();
+
+        this.renderer?.dispose();
+
+        this.renderer
+            ?.domElement
+            ?.remove();
+    }
 }
