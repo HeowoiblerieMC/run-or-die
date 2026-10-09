@@ -1,56 +1,242 @@
-export function createAuthScreen({ onSignIn, onRegister, onGuest }) {
-    const root = document.createElement("main");
-    root.className = "auth-screen";
-    root.innerHTML = `
-        <section class="panel auth-panel">
-            <p class="eyebrow">ONLINE REBUILD</p>
-            <h1>RUN FOR LIVE</h1>
-            <p class="muted">Sign in, then enter the main lobby.</p>
+export function createAuthScreen({
+    onSignIn,
+    onRegister,
+    onGuest
+}) {
+    const screen = document.createElement("main");
 
-            <form data-sign-in>
-                <h2>Sign in</h2>
-                <label>Login ID<input name="loginId" required autocomplete="username"></label>
-                <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
-                <button class="primary">SIGN IN</button>
+    screen.className = "auth-screen";
+
+    screen.innerHTML = `
+        <section class="auth-card">
+            <div class="auth-brand">
+                <span class="auth-brand__status">
+                    ONLINE
+                </span>
+
+                <h1>
+                    RUN FOR<br>
+                    LIVE
+                </h1>
+
+                <p>
+                    Sign in and enter the main lobby.
+                </p>
+            </div>
+
+            <form
+                class="auth-form"
+                data-sign-in
+            >
+                <h2>SIGN IN</h2>
+
+                <label>
+                    <span>Login ID</span>
+
+                    <input
+                        name="loginId"
+                        type="text"
+                        minlength="4"
+                        maxlength="20"
+                        autocapitalize="none"
+                        autocomplete="username"
+                        spellcheck="false"
+                        required
+                    >
+                </label>
+
+                <label>
+                    <span>Password</span>
+
+                    <input
+                        name="password"
+                        type="password"
+                        minlength="8"
+                        autocomplete="current-password"
+                        required
+                    >
+                </label>
+
+                <button
+                    class="auth-primary"
+                    type="submit"
+                >
+                    SIGN IN
+                </button>
             </form>
 
-            <details>
-                <summary>Create account</summary>
-                <form data-register>
-                    <label>Name<input name="displayName" minlength="3" maxlength="16" required></label>
-                    <label>Login ID<input name="loginId" minlength="4" maxlength="20" required></label>
-                    <label>Password<input name="password" type="password" minlength="12" required></label>
-                    <button class="primary">CREATE ACCOUNT</button>
+            <details class="register-panel">
+                <summary>
+                    CREATE ACCOUNT
+                </summary>
+
+                <form
+                    class="auth-form"
+                    data-register
+                >
+                    <label>
+                        <span>Display name</span>
+
+                        <input
+                            name="displayName"
+                            type="text"
+                            minlength="3"
+                            maxlength="16"
+                            autocomplete="nickname"
+                            required
+                        >
+                    </label>
+
+                    <label>
+                        <span>Login ID</span>
+
+                        <input
+                            name="loginId"
+                            type="text"
+                            minlength="4"
+                            maxlength="20"
+                            autocapitalize="none"
+                            autocomplete="username"
+                            spellcheck="false"
+                            required
+                        >
+                    </label>
+
+                    <label>
+                        <span>Password</span>
+
+                        <input
+                            name="password"
+                            type="password"
+                            minlength="8"
+                            autocomplete="new-password"
+                            required
+                        >
+                    </label>
+
+                    <label>
+                        <span>Confirm password</span>
+
+                        <input
+                            name="confirmPassword"
+                            type="password"
+                            minlength="8"
+                            autocomplete="new-password"
+                            required
+                        >
+                    </label>
+
+                    <button
+                        class="auth-primary"
+                        type="submit"
+                    >
+                        CREATE ACCOUNT
+                    </button>
                 </form>
             </details>
 
-            <button data-guest>CONTINUE AS GUEST</button>
-            <p class="error" data-error hidden></p>
+            <button
+                class="auth-guest"
+                data-guest
+                type="button"
+            >
+                CONTINUE AS GUEST
+            </button>
+
+            <div
+                class="auth-loading"
+                data-loading
+                hidden
+            >
+                CONNECTING...
+            </div>
+
+            <p
+                class="auth-error"
+                data-error
+                hidden
+            ></p>
         </section>
     `;
 
-    const error = root.querySelector("[data-error]");
-    const run = async task => {
-        error.hidden = true;
-        try { await task(); }
-        catch (exception) {
-            error.textContent = exception.message || String(exception);
-            error.hidden = false;
+    const errorElement =
+        screen.querySelector("[data-error]");
+
+    const loadingElement =
+        screen.querySelector("[data-loading]");
+
+    const buttons =
+        screen.querySelectorAll("button");
+
+    async function run(action) {
+        errorElement.hidden = true;
+        loadingElement.hidden = false;
+
+        buttons.forEach(button => {
+            button.disabled = true;
+        });
+
+        try {
+            await action();
+        } catch (error) {
+            errorElement.textContent =
+                error?.message ||
+                String(error);
+
+            errorElement.hidden = false;
+        } finally {
+            loadingElement.hidden = true;
+
+            buttons.forEach(button => {
+                button.disabled = false;
+            });
         }
-    };
+    }
 
-    root.querySelector("[data-sign-in]").onsubmit = event => {
-        event.preventDefault();
-        const values = Object.fromEntries(new FormData(event.currentTarget));
-        run(() => onSignIn(values));
-    };
+    const signInForm =
+        screen.querySelector("[data-sign-in]");
 
-    root.querySelector("[data-register]").onsubmit = event => {
-        event.preventDefault();
-        const values = Object.fromEntries(new FormData(event.currentTarget));
-        run(() => onRegister(values));
-    };
+    signInForm.addEventListener(
+        "submit",
+        event => {
+            event.preventDefault();
 
-    root.querySelector("[data-guest]").onclick = () => run(onGuest);
-    return root;
+            const values =
+                Object.fromEntries(
+                    new FormData(
+                        event.currentTarget
+                    )
+                );
+
+            run(() => onSignIn(values));
+        }
+    );
+
+    const registerForm =
+        screen.querySelector("[data-register]");
+
+    registerForm.addEventListener(
+        "submit",
+        event => {
+            event.preventDefault();
+
+            const values =
+                Object.fromEntries(
+                    new FormData(
+                        event.currentTarget
+                    )
+                );
+
+            run(() => onRegister(values));
+        }
+    );
+
+    screen
+        .querySelector("[data-guest]")
+        .addEventListener(
+            "click",
+            () => run(onGuest)
+        );
+
+    return screen;
 }
