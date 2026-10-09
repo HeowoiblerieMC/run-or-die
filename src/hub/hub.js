@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import {HUB} from "../config.js";
-import {playMenu} from "../ui/play-menu.js";
+import { openModeMenu } from "../ui/mode-menu.js";
 import {board} from "../ui/board.js";
 import {LeaderboardService} from "../services/leaderboard.js";
 import {RoomService} from "../services/rooms.js";
