@@ -4,9 +4,12 @@ export function createAuthScreen({
     onGuest
 }) {
     const screen =
-        document.createElement("main");
+        document.createElement(
+            "main"
+        );
 
-    screen.className = "auth-screen";
+    screen.className =
+        "auth-screen";
 
     screen.innerHTML = `
         <section class="auth-panel panel">
@@ -22,7 +25,7 @@ export function createAuthScreen({
                 Sign in and enter the main lobby.
             </p>
 
-            <form data-sign-in>
+            <form data-login>
                 <h2>SIGN IN</h2>
 
                 <label>
@@ -30,7 +33,6 @@ export function createAuthScreen({
 
                     <input
                         name="loginId"
-                        type="text"
                         minlength="4"
                         maxlength="20"
                         autocomplete="username"
@@ -71,10 +73,8 @@ export function createAuthScreen({
 
                         <input
                             name="displayName"
-                            type="text"
                             minlength="3"
                             maxlength="16"
-                            autocomplete="nickname"
                             required
                         >
                     </label>
@@ -84,10 +84,8 @@ export function createAuthScreen({
 
                         <input
                             name="loginId"
-                            type="text"
                             minlength="4"
                             maxlength="20"
-                            autocomplete="username"
                             autocapitalize="none"
                             spellcheck="false"
                             required
@@ -101,7 +99,6 @@ export function createAuthScreen({
                             name="password"
                             type="password"
                             minlength="8"
-                            autocomplete="new-password"
                             required
                         >
                     </label>
@@ -113,7 +110,6 @@ export function createAuthScreen({
                             name="confirmPassword"
                             type="password"
                             minlength="8"
-                            autocomplete="new-password"
                             required
                         >
                     </label>
@@ -135,14 +131,6 @@ export function createAuthScreen({
             </button>
 
             <p
-                class="auth-status"
-                data-status
-                hidden
-            >
-                CONNECTING...
-            </p>
-
-            <p
                 class="error"
                 data-error
                 hidden
@@ -155,43 +143,30 @@ export function createAuthScreen({
             "[data-error]"
         );
 
-    const statusElement =
-        screen.querySelector(
-            "[data-status]"
-        );
-
-    const buttons =
-        screen.querySelectorAll(
-            "button"
-        );
-
-    async function run(action) {
-        errorElement.hidden = true;
-        statusElement.hidden = false;
-
-        buttons.forEach(button => {
-            button.disabled = true;
-        });
+    async function run(
+        action
+    ) {
+        errorElement.hidden =
+            true;
 
         try {
             await action();
-        } catch (error) {
+        } catch (
+            error
+        ) {
             errorElement.textContent =
                 error?.message ||
                 String(error);
 
-            errorElement.hidden = false;
-        } finally {
-            statusElement.hidden = true;
-
-            buttons.forEach(button => {
-                button.disabled = false;
-            });
+            errorElement.hidden =
+                false;
         }
     }
 
     screen
-        .querySelector("[data-sign-in]")
+        .querySelector(
+            "[data-login]"
+        )
         .addEventListener(
             "submit",
             event => {
@@ -204,12 +179,19 @@ export function createAuthScreen({
                         )
                     );
 
-                run(() => onSignIn(values));
+                run(
+                    () =>
+                        onSignIn(
+                            values
+                        )
+                );
             }
         );
 
     screen
-        .querySelector("[data-register]")
+        .querySelector(
+            "[data-register]"
+        )
         .addEventListener(
             "submit",
             event => {
@@ -222,15 +204,25 @@ export function createAuthScreen({
                         )
                     );
 
-                run(() => onRegister(values));
+                run(
+                    () =>
+                        onRegister(
+                            values
+                        )
+                );
             }
         );
 
     screen
-        .querySelector("[data-guest]")
+        .querySelector(
+            "[data-guest]"
+        )
         .addEventListener(
             "click",
-            () => run(onGuest)
+            () =>
+                run(
+                    onGuest
+                )
         );
 
     return screen;
