@@ -24,13 +24,13 @@ function addPart(parent, object, name, position, rotation = [0, 0, 0]) {
 
 function createHead({ skin = 0xcaa88f, mask = false } = {}) {
     const group = new THREE.Group();
-    const skull = mesh(new THREE.SphereGeometry(0.31, 18, 14), skin);
+    const skull = mesh(new THREE.SphereGeometry(0.31, 10, 8), skin);
     skull.scale.set(0.9, 1.08, 0.92);
     group.add(skull);
 
     if (mask) {
         const face = mesh(
-            new THREE.SphereGeometry(0.32, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.58),
+            new THREE.SphereGeometry(0.32, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.58),
             0x171a1d,
             { metalness: 0.5, roughness: 0.4 }
         );
@@ -45,7 +45,7 @@ function createHead({ skin = 0xcaa88f, mask = false } = {}) {
             roughness: 0.2
         });
         [-0.115, 0.115].forEach(x => {
-            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), eyeMaterial);
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 4), eyeMaterial);
             eye.position.set(x, 0.065, -0.285);
             group.add(eye);
         });
@@ -57,7 +57,7 @@ function createHead({ skin = 0xcaa88f, mask = false } = {}) {
         mouth.position.set(0, -0.13, -0.295);
         group.add(mouth);
     } else {
-        const hair = mesh(new THREE.SphereGeometry(0.316, 18, 12, 0, Math.PI * 2, 0, Math.PI * 0.44), 0x252321);
+        const hair = mesh(new THREE.SphereGeometry(0.316, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.44), 0x252321);
         hair.position.y = 0.055;
         group.add(hair);
     }
@@ -78,7 +78,7 @@ function createHumanoid({
     root.add(hips);
     root.userData.parts.hips = hips;
 
-    const pelvis = mesh(new THREE.CapsuleGeometry(pursuer ? 0.36 : 0.31, 0.34, 5, 10), trouserColor);
+    const pelvis = mesh(new THREE.CapsuleGeometry(pursuer ? 0.36 : 0.31, 0.34, 3, 6), trouserColor);
     pelvis.rotation.z = Math.PI / 2;
     hips.add(pelvis);
 
@@ -88,7 +88,7 @@ function createHumanoid({
     root.userData.parts.torso = torso;
 
     const chest = mesh(
-        new THREE.CapsuleGeometry(pursuer ? 0.47 : 0.39, pursuer ? 0.74 : 0.62, 7, 12),
+        new THREE.CapsuleGeometry(pursuer ? 0.47 : 0.39, pursuer ? 0.74 : 0.62, 4, 7),
         pursuer ? 0x17191c : jacketColor,
         pursuer ? { metalness: 0.18, roughness: 0.58 } : {}
     );
@@ -101,7 +101,7 @@ function createHumanoid({
     vest.position.set(0, 0, -0.31);
     torso.add(vest);
 
-    const neck = mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.2, 12), pursuer ? 0x24282c : skinColor);
+    const neck = mesh(new THREE.CylinderGeometry(0.13, 0.15, 0.2, 8), pursuer ? 0x24282c : skinColor);
     neck.position.y = pursuer ? 0.67 : 0.58;
     torso.add(neck);
 
@@ -127,7 +127,7 @@ function createHumanoid({
         }
 
         const upperMesh = mesh(
-            new THREE.CapsuleGeometry(radius, upperLength, 5, 9),
+            new THREE.CapsuleGeometry(radius, upperLength, 3, 6),
             isArm ? (pursuer ? 0x1b1e21 : jacketColor) : trouserColor
         );
         upperMesh.position.y = -upperLength * 0.52;
@@ -136,14 +136,14 @@ function createHumanoid({
         lower.position.y = -upperLength - 0.08;
         upper.add(lower);
         const lowerMesh = mesh(
-            new THREE.CapsuleGeometry(radius * 0.88, lowerLength, 5, 9),
+            new THREE.CapsuleGeometry(radius * 0.88, lowerLength, 3, 6),
             isArm ? (pursuer ? 0x262a2d : 0x25343c) : 0x11191f
         );
         lowerMesh.position.y = -lowerLength * 0.5;
         lower.add(lowerMesh);
 
         if (isArm) {
-            const hand = mesh(new THREE.SphereGeometry(radius * 0.82, 10, 8), pursuer ? 0x303438 : skinColor);
+            const hand = mesh(new THREE.SphereGeometry(radius * 0.82, 7, 5), pursuer ? 0x303438 : skinColor);
             hand.position.y = -lowerLength - 0.08;
             lower.add(hand);
         } else {
@@ -170,7 +170,7 @@ function createHumanoid({
         backUnit.position.set(0, 0.02, 0.43);
         torso.add(backUnit);
 
-        const redCore = mesh(new THREE.SphereGeometry(0.11, 12, 10), 0xff1b12, {
+        const redCore = mesh(new THREE.SphereGeometry(0.11, 7, 5), 0xff1b12, {
             emissive: 0xff0800,
             emissiveIntensity: 2.5
         });
