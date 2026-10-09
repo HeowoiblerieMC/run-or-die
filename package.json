@@ -1,9 +1,9 @@
 {
-  "name": "run-or-die",
+  "name": "run-for-live",
   "private": true,
-  "version": "0.4.0",
+  "version": "1.0.0",
   "type": "module",
-  "scripts": {"dev":"vite","build":"vite build","preview":"vite preview"},
-  "dependencies": {"three":"^0.180.0"},
-  "devDependencies": {"vite":"^7.1.0"}
+  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview" },
+  "dependencies": { "@supabase/supabase-js": "^2.57.4", "three": "^0.180.0" },
+  "devDependencies": { "vite": "^7.1.9" }
 }
