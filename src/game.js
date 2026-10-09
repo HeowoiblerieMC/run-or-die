@@ -26,20 +26,20 @@ export class Game{
   constructor(container,{role="ESCAPEE",onExit,onRetry,profile,profiles=[],onCoinsChanged}={}){
     Object.assign(this,{container,role,onExit,onRetry,onCoinsChanged});
     this.profile=profile||storedProfile();this.profiles=Array.isArray(profiles)?profiles:[];
-    this.keys=new Set();this.collisionBounds=[];this.escapees=[];this.pursuers=[];this.walls=[];this.obstacles=[];this.terminals=[];this.clues=[];this.finalRoutes=[];this.selectedRoute=null;this.routeProgress=0;this.objectiveCooldown=false;
+    this.keys=new Set();this.collisionBounds=[];this.frameIndex=0;this.pathCalculationsThisFrame=0;this.maxPathCalculationsPerFrame=1;this.escapees=[];this.pursuers=[];this.walls=[];this.obstacles=[];this.terminals=[];this.clues=[];this.finalRoutes=[];this.selectedRoute=null;this.routeProgress=0;this.objectiveCooldown=false;
     this.playerPosition=new THREE.Vector3();this.playerModel=null;this.playerAnimator=null;
     this.cameraModeIndex=0;this.cameraMode=CAMERA_MODES[0];this.cameraRay=new THREE.Raycaster();
     this.yaw=0;this.pitch=0;this.elapsed=0;this.stamina=100;this.repaired=0;this.repairProgress=0;
     this.running=false;this.ended=false;this.rewardGranted=false;this.chatOpen=false;this.playerHealth=3;this.lastTeamReplyAt=0;this.teamConversationHistory=[];this.npcConversationMemory=new Map();this.nextAmbientChatAt=performance.now()+5000+Math.random()*5000;this.ambientConversationId=0;this.lastSafePlayerPosition=new THREE.Vector3();this.chatMessages=[];this.chatMaximum=10;
     this.touch={sprint:false,sneak:false,interact:false};this.joystick={x:0,y:0,pointer:null};this.dragPointer=null;
-    this.animate=this.animate.bind(this);this.keyDown=this.keyDown.bind(this);this.keyUp=this.keyUp.bind(this);this.mouseMove=this.mouseMove.bind(this);this.resize=this.resize.bind(this);
+    this.animate=this.animate.bind(this);this.visibilityChange=this.visibilityChange.bind(this);this.keyDown=this.keyDown.bind(this);this.keyUp=this.keyUp.bind(this);this.mouseMove=this.mouseMove.bind(this);this.resize=this.resize.bind(this);
   }
 
   start(){
-    this.scene=new THREE.Scene();this.scene.background=new THREE.Color(0x071119);this.scene.fog=new THREE.Fog(0x071119,22,95);
-    this.camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.08,240);this.camera.rotation.order="YXZ";
-    this.renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false);this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.container.appendChild(this.renderer.domElement);
+    this.scene=new THREE.Scene();this.scene.background=new THREE.Color(0x071119);this.scene.fog=new THREE.Fog(0x071119,18,78);
+    this.camera=new THREE.PerspectiveCamera(72,innerWidth/innerHeight,.08,175);this.camera.rotation.order="YXZ";
+    const coarsePointer=matchMedia("(pointer: coarse)").matches;this.renderer=new THREE.WebGLRenderer({antialias:!coarsePointer,powerPreference:"high-performance",alpha:false,stencil:false,preserveDrawingBuffer:false});
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio,coarsePointer?1:1.5));this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false);this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.container.appendChild(this.renderer.domElement);
     this.clock=new THREE.Clock();this.createLighting();this.createFacility();this.createInteriors();this.createObjectives();this.rebuildCollisionCache();this.createCharacters();this.createHud();this.createGameChat();this.createTouchControls();this.bindEvents();this.updateCamera();
     this.addSystemMessage(this.role==="PURSUER"?"Coordinate with five Wardens and capture all escapees.":"Your team starts in the north safe zone. Six Wardens begin in the south sector.");
     this.running=true;this.clock.start();this.animate();
@@ -507,7 +507,7 @@ export class Game{
     const hold=(selector,key)=>{const control=root.querySelector(selector);control.onpointerdown=e=>{e.preventDefault();if(!this.chatOpen)this.touch[key]=true};control.onpointerup=control.onpointercancel=()=>this.touch[key]=false};hold("[data-run]","sprint");hold("[data-use]","interact");root.querySelector("[data-sneak]").onclick=()=>{if(!this.chatOpen)this.touch.sneak=!this.touch.sneak};root.querySelector("[data-view]").onclick=()=>{if(!this.chatOpen)this.cycleCameraMode()};root.querySelector("[data-chat]").onclick=()=>this.openChat();root.querySelector("[data-capture]").onclick=()=>{if(!this.chatOpen&&this.role==="PURSUER")this.tryCapture()};
   }
 
-  bindEvents(){addEventListener("keydown",this.keyDown);addEventListener("keyup",this.keyUp);addEventListener("mousemove",this.mouseMove);addEventListener("resize",this.resize);this.renderer.domElement.onclick=()=>{if(!this.chatOpen)this.renderer.domElement.requestPointerLock?.()}}
+  bindEvents(){addEventListener("keydown",this.keyDown);addEventListener("keyup",this.keyUp);addEventListener("mousemove",this.mouseMove);addEventListener("resize",this.resize);document.addEventListener("visibilitychange",this.visibilityChange);this.renderer.domElement.onclick=()=>{if(!this.chatOpen)this.renderer.domElement.requestPointerLock?.()}}
   keyDown(e){if(this.chatOpen)return;if(e.code==="KeyT"&&!e.repeat){e.preventDefault();this.openChat();return}if(e.code==="Escape"){this.stop();this.onExit?.();return}if(e.code==="KeyC"&&!e.repeat){this.cycleCameraMode();return}if(e.code==="Space"&&this.role==="PURSUER")this.tryCapture();this.keys.add(e.code)}
   keyUp(e){if(this.chatOpen)return;this.keys.delete(e.code);if(e.code==="KeyE")this.repairProgress=0}
   mouseMove(e){if(this.chatOpen||document.pointerLockElement!==this.renderer.domElement)return;this.yaw-=e.movementX*.0023;this.pitch=THREE.MathUtils.clamp(this.pitch-e.movementY*.0023,-1.25,1.25)}
@@ -637,7 +637,8 @@ export class Game{
       npc.userData.pathFailures+=1;
     }
 
-    if((targetMoved||!npc.userData.navPath.length)&&now>=npc.userData.nextPathAt){
+    if((targetMoved||!npc.userData.navPath.length)&&now>=npc.userData.nextPathAt&&this.pathCalculationsThisFrame<this.maxPathCalculationsPerFrame){
+      this.pathCalculationsThisFrame+=1;
       const path=this.findNavigationPath(npc.position,target,radius);
       npc.userData.navPath=path;
       npc.userData.navIndex=0;
@@ -896,7 +897,18 @@ export class Game{
       }
     }
   }
-  updateNpcs(dt){this.escapees.forEach(e=>this.updateEscapeeNpc(e,dt));this.pursuers.forEach(p=>this.updatePursuerNpc(p,dt))}
+  updateNpcs(dt){
+    const escapeeSlices=3;
+    const pursuerSlices=2;
+    const escapeeSlice=this.frameIndex%escapeeSlices;
+    const pursuerSlice=this.frameIndex%pursuerSlices;
+    for(let index=escapeeSlice;index<this.escapees.length;index+=escapeeSlices){
+      this.updateEscapeeNpc(this.escapees[index],dt*escapeeSlices);
+    }
+    for(let index=pursuerSlice;index<this.pursuers.length;index+=pursuerSlices){
+      this.updatePursuerNpc(this.pursuers[index],dt*pursuerSlices);
+    }
+  }
   completeTerminal(terminal,npc=null){if(terminal.userData.repaired)return;terminal.userData.repaired=true;terminal.userData.progress=1;terminal.userData.screenMaterial.color.set(0x1f7848);terminal.userData.screenMaterial.emissive.set(0x29ff82);terminal.userData.assignedNpcId=null;this.repaired+=1;if(npc)this.addNpcMessage(npc,`terminal-${this.repaired}`,"Terminal restored!",true);this.escapees.forEach(e=>{if(e.userData.targetTerminal===terminal)e.userData.targetTerminal=null});if(this.repaired>=REQUIRED_TERMINALS){this.exitGate.userData.open=true;this.exitGate.userData.door.visible=false;this.addSystemMessage("All codes accepted. The final gate is open. Choose one of three routes.")}}
   nearestClue(){return this.clues.filter(c=>!c.userData.found).sort((a,b)=>distanceXZ(this.playerPosition,a.position)-distanceXZ(this.playerPosition,b.position))[0]||null}
   showTerminalModal(terminal){
@@ -915,7 +927,8 @@ export class Game{
   grantMatchReward(result){if(this.rewardGranted||this.profile.role==="GUEST")return 0;this.rewardGranted=true;const reward=this.calculateReward(result);if(reward>0){addCoins(this.profile,reward);this.onCoinsChanged?.({profile:this.profile,amount:reward,result})}return reward}
   updateHud(){const remaining=Math.max(0,MATCH_TIME-this.elapsed);this.ui.time.textContent=`${String(Math.floor(remaining/60)).padStart(2,"0")}:${String(Math.floor(remaining%60)).padStart(2,"0")}`;this.ui.terminals.textContent=`${this.repaired} / ${REQUIRED_TERMINALS}`;const captured=this.escapees.filter(e=>e.userData.captured).length,active=this.escapees.filter(e=>!e.userData.captured&&!e.userData.escaped).length;this.ui.captured.textContent=`${captured} / ${this.escapees.length}`;this.ui.active.textContent=`${active+(this.role==="ESCAPEE"?1:0)} ACTIVE`;this.ui.health.textContent=`${Math.max(0,this.playerHealth)} / 3`;this.ui.stamina.textContent=`${Math.round(this.stamina)}%`}
   end(title){if(this.ended)return;this.ended=true;this.running=false;this.closeChat(false);document.exitPointerLock?.();const reward=this.grantMatchReward(title),overlay=document.createElement("section");overlay.className="overlay";overlay.innerHTML=`<article class="overlay-card"><h2>${title}</h2>${reward>0?`<p class="match-reward">+${reward.toLocaleString()} Coins</p>`:""}<div class="menu-actions"><button class="menu-button menu-button--primary" data-retry>RETRY</button><button class="menu-button" data-menu>MENU</button></div></article>`;document.body.appendChild(overlay);overlay.querySelector("[data-retry]").onclick=()=>{this.stop();this.onRetry?.()};overlay.querySelector("[data-menu]").onclick=()=>{this.stop();this.onExit?.()};this.overlay=overlay}
-  animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.elapsed+=dt;this.updatePlayer(dt);this.updateNpcs(dt);this.updateObjectives(dt);this.updateCamera();this.updateHud();this.checkMatchEnd();this.updateStuckRecovery(dt);this.updateAmbientConversation();if(this.elapsed>=MATCH_TIME)this.end(this.role==="PURSUER"?"PURSUER WIN":"TIME EXPIRED");this.renderer.render(this.scene,this.camera)}
+  animate(){if(!this.running)return;this.frame=requestAnimationFrame(this.animate);const dt=Math.min(this.clock.getDelta(),.05);this.frameIndex+=1;this.pathCalculationsThisFrame=0;this.elapsed+=dt;this.updatePlayer(dt);this.updateNpcs(dt);this.updateObjectives(dt);this.updateCamera();this.updateHud();this.checkMatchEnd();if(this.frameIndex%12===0)this.updateStuckRecovery(dt*12);this.updateAmbientConversation();if(this.elapsed>=MATCH_TIME)this.end(this.role==="PURSUER"?"PURSUER WIN":"TIME EXPIRED");this.renderer.render(this.scene,this.camera)}
+  visibilityChange(){if(document.hidden)this.clock.stop();else{this.clock.start();this.clock.getDelta()}}
   resize(){this.camera.aspect=this.container.clientWidth/this.container.clientHeight;this.camera.updateProjectionMatrix();this.renderer.setSize(this.container.clientWidth,this.container.clientHeight,false)}
-  stop(){this.running=false;cancelAnimationFrame(this.frame);clearTimeout(this.viewToastTimer);removeEventListener("keydown",this.keyDown);removeEventListener("keyup",this.keyUp);removeEventListener("mousemove",this.mouseMove);removeEventListener("resize",this.resize);this.hud?.remove();this.chatRoot?.remove();this.touchRoot?.remove();this.overlay?.remove();this.renderer?.dispose();this.renderer?.domElement.remove()}
+  stop(){this.running=false;cancelAnimationFrame(this.frame);clearTimeout(this.viewToastTimer);removeEventListener("keydown",this.keyDown);removeEventListener("keyup",this.keyUp);removeEventListener("mousemove",this.mouseMove);removeEventListener("resize",this.resize);document.removeEventListener("visibilitychange",this.visibilityChange);this.hud?.remove();this.chatRoot?.remove();this.touchRoot?.remove();this.overlay?.remove();this.renderer?.dispose();this.renderer?.domElement.remove()}
 }
