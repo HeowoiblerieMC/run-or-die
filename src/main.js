@@ -2,11 +2,11 @@ import "./style.css";
 
 import {
     AccountService
-} from "./services/account.js";
+} from "./services/account-service.js";
 
 import {
     createAuthScreen
-} from "./ui/auth.js";
+} from "./ui/auth-screen.js";
 
 import {
     Hub
@@ -20,31 +20,49 @@ const accounts =
 
 let currentHub = null;
 
-async function enterHub(profile) {
-    if (currentHub) {
-        await currentHub.stop();
+async function stopCurrentHub() {
+    if (!currentHub) {
+        return;
+    }
+
+    try {
+        await currentHub.stop?.();
+    } finally {
         currentHub = null;
     }
+}
+
+async function enterHub(profile) {
+    await stopCurrentHub();
 
     app.replaceChildren();
 
-    currentHub = new Hub(app, {
-        profile,
+    currentHub = new Hub(
+        app,
+        {
+            profile,
 
-        onLogout: async () => {
-            try {
-                await currentHub?.stop();
-            } finally {
-                currentHub = null;
+            onSignOut: async () => {
+                await stopCurrentHub();
+
+                if (!profile.guest) {
+                    await accounts.signOut();
+                }
+
+                showAuthentication();
+            },
+
+            onLogout: async () => {
+                await stopCurrentHub();
+
+                if (!profile.guest) {
+                    await accounts.signOut();
+                }
+
+                showAuthentication();
             }
-
-            if (!profile.guest) {
-                await accounts.signOut();
-            }
-
-            showAuthentication();
         }
-    });
+    );
 
     await currentHub.start();
 }
@@ -72,9 +90,10 @@ function showAuthentication() {
             },
 
             onGuest: async () => {
-                await enterHub(
-                    accounts.createGuest()
-                );
+                const profile =
+                    accounts.createGuest();
+
+                await enterHub(profile);
             }
         })
     );
@@ -83,7 +102,8 @@ function showAuthentication() {
 async function startApplication() {
     try {
         const profile =
-            await accounts.getCurrentProfile();
+            await accounts
+                .getCurrentProfile();
 
         if (profile) {
             await enterHub(profile);
@@ -92,7 +112,7 @@ async function startApplication() {
         }
     } catch (error) {
         console.error(
-            "Application start failed:",
+            "Application startup failed:",
             error
         );
 
