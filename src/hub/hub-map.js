@@ -1,159 +1,381 @@
 import * as THREE from "three";
 
-const material = (color, extra = {}) => new THREE.MeshStandardMaterial({
+function createMaterial(
     color,
-    roughness: 0.7,
-    metalness: 0.18,
-    ...extra
-});
-
-function addBox(scene, size, position, color, extra = {}) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), material(color, extra));
-    mesh.position.set(...position);
-    scene.add(mesh);
-    return mesh;
+    extra = {}
+) {
+    return new THREE
+        .MeshStandardMaterial({
+            color,
+            roughness:
+                0.7,
+            metalness:
+                0.2,
+            ...extra
+        });
 }
 
-function addTextSprite(text, color = "#ffffff", scale = [8, 2, 1]) {
-    const canvas = document.createElement("canvas");
-    canvas.width = 1024;
-    canvas.height = 256;
-    const context = canvas.getContext("2d");
-    context.clearRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "rgba(3, 9, 14, 0.82)";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.strokeStyle = color;
-    context.lineWidth = 10;
-    context.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
-    context.fillStyle = color;
-    context.font = "900 112px system-ui";
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(text, canvas.width / 2, canvas.height / 2);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
-    sprite.scale.set(...scale);
+function createTextSprite(
+    text,
+    color
+) {
+    const canvas =
+        document.createElement(
+            "canvas"
+        );
+
+    canvas.width =
+        1024;
+
+    canvas.height =
+        256;
+
+    const context =
+        canvas.getContext("2d");
+
+    context.fillStyle =
+        "#040b11dd";
+
+    context.fillRect(
+        0,
+        0,
+        1024,
+        256
+    );
+
+    context.strokeStyle =
+        color;
+
+    context.lineWidth =
+        10;
+
+    context.strokeRect(
+        8,
+        8,
+        1008,
+        240
+    );
+
+    context.fillStyle =
+        color;
+
+    context.font =
+        "900 108px system-ui";
+
+    context.textAlign =
+        "center";
+
+    context.textBaseline =
+        "middle";
+
+    context.fillText(
+        text,
+        512,
+        128
+    );
+
+    const texture =
+        new THREE.CanvasTexture(
+            canvas
+        );
+
+    texture.colorSpace =
+        THREE.SRGBColorSpace;
+
+    const sprite =
+        new THREE.Sprite(
+            new THREE
+                .SpriteMaterial({
+                    map:
+                        texture,
+
+                    transparent:
+                        true
+                })
+        );
+
+    sprite.scale.set(
+        9,
+        2.25,
+        1
+    );
+
     return sprite;
 }
 
-function createPortal(scene, definition) {
-    const group = new THREE.Group();
-    group.position.copy(definition.position);
+function createPortal(
+    scene,
+    id,
+    x,
+    z,
+    color
+) {
+    const group =
+        new THREE.Group();
 
-    const pad = new THREE.Mesh(
-        new THREE.CylinderGeometry(4.8, 5.2, 0.5, 28),
-        material(definition.color, {
-            emissive: definition.color,
-            emissiveIntensity: 0.35
-        })
+    group.position.set(
+        x,
+        0,
+        z
     );
-    pad.position.y = 0.25;
-    group.add(pad);
 
-    const left = new THREE.Mesh(new THREE.BoxGeometry(0.8, 6, 0.8), material(0x334b5a, { metalness: 0.55 }));
-    const right = left.clone();
-    left.position.set(-3.8, 3, 0);
-    right.position.set(3.8, 3, 0);
-    group.add(left, right);
+    const platform =
+        new THREE.Mesh(
+            new THREE
+                .CylinderGeometry(
+                    5,
+                    5.4,
+                    0.5,
+                    28
+                ),
 
-    const top = new THREE.Mesh(
-        new THREE.BoxGeometry(8.4, 0.8, 0.8),
-        material(definition.color, { emissive: definition.color, emissiveIntensity: 0.7 })
+            createMaterial(
+                color,
+                {
+                    emissive:
+                        color,
+
+                    emissiveIntensity:
+                        0.35
+                }
+            )
+        );
+
+    platform.position.y =
+        0.25;
+
+    group.add(
+        platform
     );
-    top.position.set(0, 5.7, 0);
-    group.add(top);
 
-    const label = addTextSprite(definition.label, `#${definition.color.toString(16).padStart(6, "0")}`, [7.5, 1.9, 1]);
-    label.position.set(0, 7.2, 0);
-    group.add(label);
+    for (
+        const pillarX of
+        [
+            -4,
+            4
+        ]
+    ) {
+        const pillar =
+            new THREE.Mesh(
+                new THREE
+                    .BoxGeometry(
+                        0.8,
+                        6,
+                        0.8
+                    ),
 
-    const glow = new THREE.PointLight(definition.color, 2.2, 18, 2);
-    glow.position.y = 3;
-    group.add(glow);
+                createMaterial(
+                    0x344c59
+                )
+            );
 
-    group.userData = definition;
-    scene.add(group);
-    return group;
+        pillar.position.set(
+            pillarX,
+            3,
+            0
+        );
+
+        group.add(
+            pillar
+        );
+    }
+
+    const top =
+        new THREE.Mesh(
+            new THREE
+                .BoxGeometry(
+                    8.8,
+                    0.8,
+                    0.8
+                ),
+
+            createMaterial(
+                color,
+                {
+                    emissive:
+                        color,
+
+                    emissiveIntensity:
+                        0.8
+                }
+            )
+        );
+
+    top.position.y =
+        5.7;
+
+    group.add(
+        top
+    );
+
+    const label =
+        createTextSprite(
+            id,
+            `#${color
+                .toString(16)
+                .padStart(6, "0")}`
+        );
+
+    label.position.y =
+        7.2;
+
+    group.add(
+        label
+    );
+
+    group.userData = {
+        id,
+        label:
+            id
+    };
+
+    scene.add(
+        group
+    );
+
+    return {
+        id,
+        label:
+            id,
+        position:
+            group.position,
+        object:
+            group
+    };
 }
 
-export function buildHub(scene) {
-    const floor = new THREE.Mesh(
-        new THREE.CircleGeometry(42, 64),
-        material(0x18242d)
+export function buildHub(
+    scene
+) {
+    const floor =
+        new THREE.Mesh(
+            new THREE
+                .CircleGeometry(
+                    48,
+                    64
+                ),
+
+            createMaterial(
+                0x17242d
+            )
+        );
+
+    floor.rotation.x =
+        -Math.PI / 2;
+
+    scene.add(
+        floor
     );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
 
-    const center = new THREE.Mesh(
-        new THREE.CylinderGeometry(10, 12, 0.65, 40),
-        material(0x243844, { metalness: 0.32 })
+    const roof =
+        new THREE.Mesh(
+            new THREE
+                .CylinderGeometry(
+                    47,
+                    47,
+                    0.8,
+                    64
+                ),
+
+            createMaterial(
+                0x0b1118
+            )
+        );
+
+    roof.position.y =
+        13;
+
+    scene.add(
+        roof
     );
-    center.position.y = 0.32;
-    scene.add(center);
 
-    const neonRing = new THREE.Mesh(
-        new THREE.RingGeometry(12.5, 13, 64),
-        material(0x24bffc, { emissive: 0x168aca, emissiveIntensity: 1.2 })
-    );
-    neonRing.rotation.x = -Math.PI / 2;
-    neonRing.position.y = 0.68;
-    scene.add(neonRing);
+    for (
+        let index = 0;
+        index < 24;
+        index += 1
+    ) {
+        const angle =
+            index /
+            24 *
+            Math.PI *
+            2;
 
-    const monument = new THREE.Group();
-    monument.add(addTextSprite("RUN FOR LIVE", "#62d8ff", [15, 3.5, 1]));
-    monument.position.set(0, 7.5, 0);
-    scene.add(monument);
+        const pillar =
+            new THREE.Mesh(
+                new THREE
+                    .BoxGeometry(
+                        1.2,
+                        12,
+                        1.2
+                    ),
 
-    const ceiling = new THREE.Mesh(
-        new THREE.CylinderGeometry(41, 41, 0.8, 64),
-        material(0x0d151c, { metalness: 0.35 })
-    );
-    ceiling.position.y = 12;
-    scene.add(ceiling);
+                createMaterial(
+                    0x243b48
+                )
+            );
 
-    const obstacles = [];
-    for (let index = 0; index < 20; index += 1) {
-        const angle = index / 20 * Math.PI * 2;
-        const x = Math.cos(angle) * 39;
-        const z = Math.sin(angle) * 39;
-        const pillar = addBox(scene, [1.25, 11, 1.25], [x, 5.5, z], 0x29404c, { metalness: 0.42 });
-        obstacles.push(pillar);
+        pillar.position.set(
+            Math.cos(angle) * 45,
+            6,
+            Math.sin(angle) * 45
+        );
+
+        scene.add(
+            pillar
+        );
     }
 
-    for (let index = 0; index < 10; index += 1) {
-        const angle = index / 10 * Math.PI * 2;
-        const light = new THREE.PointLight(index % 2 ? 0x3ecfff : 0x8b6cff, 1.3, 18, 2);
-        light.position.set(Math.cos(angle) * 27, 7, Math.sin(angle) * 27);
-        scene.add(light);
-    }
+    const title =
+        createTextSprite(
+            "RUN FOR LIVE",
+            "#62d8ff"
+        );
 
-    const definitions = [
-        { id: "PLAY", label: "PLAY", position: new THREE.Vector3(0, 0, -27), color: 0x24c8ff },
-        { id: "LEADERBOARD", label: "LEADERBOARD", position: new THREE.Vector3(-27, 0, 0), color: 0xffc84d },
-        { id: "STORE", label: "STORE", position: new THREE.Vector3(27, 0, 0), color: 0x9d7cff },
-        { id: "PROFILE", label: "PROFILE", position: new THREE.Vector3(0, 0, 27), color: 0x63e59b }
-    ];
-    const portals = definitions.map(definition => createPortal(scene, definition));
+    title.position.set(
+        0,
+        8,
+        0
+    );
 
-    const loungePositions = [
-        [-15, 15], [15, 15], [-15, -15], [15, -15]
-    ];
-    for (const [x, z] of loungePositions) {
-        const bench = addBox(scene, [7, 0.8, 2], [x, 0.55, z], 0x314550, { metalness: 0.25 });
-        obstacles.push(bench);
-    }
+    scene.add(
+        title
+    );
 
-    scene.updateMatrixWorld(true);
-    const collisionBounds = obstacles.map(object => {
-        const bounds = new THREE.Box3().setFromObject(object);
-        return {
-            minX: bounds.min.x,
-            maxX: bounds.max.x,
-            minZ: bounds.min.z,
-            maxZ: bounds.max.z
-        };
-    });
+    return {
+        portals: [
+            createPortal(
+                scene,
+                "PLAY",
+                0,
+                -30,
+                0x28cfff
+            ),
 
-    return { portals, obstacles: collisionBounds };
+            createPortal(
+                scene,
+                "LEADERBOARD",
+                -30,
+                0,
+                0xffc84d
+            ),
+
+            createPortal(
+                scene,
+                "STORE",
+                30,
+                0,
+                0xa47cff
+            ),
+
+            createPortal(
+                scene,
+                "PROFILE",
+                0,
+                30,
+                0x62e59a
+            )
+        ],
+
+        obstacles: []
+    };
 }
