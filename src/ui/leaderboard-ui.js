@@ -1,61 +1,203 @@
-import { LEADERBOARD_CATEGORIES } from "../config.js";
-import { rankForProfile } from "../services/economy-service.js";
+import {
+    LEADERBOARD_CATEGORIES
+} from "../config.js";
 
-const plural = (value, unit) => value === 1 ? unit.replace(/s$/, "") : unit;
+export function createLeaderboardUi({
+    service,
+    profile
+}) {
+    const overlay =
+        document.createElement(
+            "section"
+        );
 
-export function createLeaderboardUi({ service, profile }) {
-    const overlay = document.createElement("section");
-    overlay.className = "overlay";
+    overlay.className =
+        "overlay";
+
     overlay.innerHTML = `
         <article class="panel leaderboard-panel">
             <header>
-                <div>
-                    <p class="eyebrow">MAIN LOBBY</p>
-                    <h2 data-title>WIN LEADS</h2>
-                </div>
-                <button data-close>×</button>
+                <h2 data-title></h2>
+
+                <button data-close>
+                    CLOSE
+                </button>
             </header>
+
             <nav data-tabs></nav>
-            <p class="you-line" data-you>Loading...</p>
+
+            <p data-you></p>
+
             <ol data-list></ol>
         </article>
     `;
 
-    const tabs = overlay.querySelector("[data-tabs]");
-    const list = overlay.querySelector("[data-list]");
-    const title = overlay.querySelector("[data-title]");
-    const you = overlay.querySelector("[data-you]");
-    let active = LEADERBOARD_CATEGORIES[0];
+    const title =
+        overlay.querySelector(
+            "[data-title]"
+        );
 
-    async function load(category) {
-        active = category;
-        title.textContent = category.title;
-        list.innerHTML = "<li>Loading...</li>";
-        const result = await service.load(category.key, category.limit, profile);
-        const mine = result.viewer;
-        you.textContent = profile.guest
-            ? "You: Sign in to enter the leaderboard"
-            : `You: ${mine?.value || 0} ${plural(mine?.value || 0, category.unit)} (${mine?.rank ? `#${mine.rank}` : "Unranked"})`;
-        list.replaceChildren(...result.entries.map(entry => {
-            const item = document.createElement("li");
-            const rank = rankForProfile({ role: entry.role, selectedRank: entry.selected_rank });
-            item.innerHTML = `<strong>#${entry.position}</strong> <span class="rank rank--${rank.className}">[${rank.label}]</span> ${entry.display_name}: <b>${entry.value} ${plural(entry.value, category.unit)}</b>`;
-            return item;
-        }));
+    const tabs =
+        overlay.querySelector(
+            "[data-tabs]"
+        );
+
+    const you =
+        overlay.querySelector(
+            "[data-you]"
+        );
+
+    const list =
+        overlay.querySelector(
+            "[data-list]"
+        );
+
+    async function load(
+        category
+    ) {
+        title.textContent =
+            category.title;
+
+        list.textContent =
+            "LOADING...";
+
+        const data =
+            await service.load(
+                category.key,
+                category.limit,
+                profile
+            );
+
+        if (
+            profile.guest
+        ) {
+            you.textContent =
+                "You: Sign in to enter the leaderboard";
+        } else {
+            const value =
+                data.viewer?.value ||
+                0;
+
+            const rank =
+                data.viewer?.rank;
+
+            you.textContent =
+                `You: ${value} ${category.unit} ` +
+                `(${rank ? `#${rank}` : "Unranked"})`;
+        }
+
+        const entries =
+            Array.isArray(
+                data.entries
+            )
+                ? data.entries
+                : [];
+
+        list.replaceChildren(
+            ...entries.map(
+                entry => {
+                    const line =
+                        document.createElement(
+                            "li"
+                        );
+
+                    let rankLabel =
+                        entry.selected_rank ||
+                        "Player";
+
+                    if (
+                        entry.role ===
+                        "ADMIN"
+                    ) {
+                        rankLabel =
+                            "Admin";
+                    }
+
+                    if (
+                        entry.role ===
+                        "MODERATOR"
+                    ) {
+                        rankLabel =
+                            "Mod";
+                    }
+
+                    line.textContent =
+                        `#${entry.position} ` +
+                        `[${rankLabel}] ` +
+                        `${entry.display_name}: ` +
+                        `${entry.value} ` +
+                        `${category.unit}`;
+
+                    return line;
+                }
+            )
+        );
     }
 
-    for (const category of LEADERBOARD_CATEGORIES) {
-        const button = document.createElement("button");
-        button.textContent = category.key === "rank_gifts_sent" ? "GIFTS" : category.key.toUpperCase();
-        button.onclick = () => load(category).catch(error => {
-            list.innerHTML = `<li>${error.message}</li>`;
-        });
-        tabs.appendChild(button);
+    for (
+        const category of
+        LEADERBOARD_CATEGORIES
+    ) {
+        const button =
+            document.createElement(
+                "button"
+            );
+
+        button.type =
+            "button";
+
+        button.textContent =
+            category.key ===
+            "rank_gifts_sent"
+                ? "GIFTS"
+                : category.key
+                    .toUpperCase();
+
+        button.addEventListener(
+            "click",
+            () => {
+                load(
+                    category
+                ).catch(
+                    error => {
+                        list.textContent =
+                            error?.message ||
+                            String(error);
+                    }
+                );
+            }
+        );
+
+        tabs.appendChild(
+            button
+        );
     }
 
-    overlay.querySelector("[data-close]").onclick = () => overlay.remove();
-    document.body.appendChild(overlay);
-    load(active).catch(error => { list.innerHTML = `<li>${error.message}</li>`; });
+    overlay
+        .querySelector(
+            "[data-close]"
+        )
+        .addEventListener(
+            "click",
+            () =>
+                overlay.remove()
+        );
+
+    document.body.appendChild(
+        overlay
+    );
+
+    load(
+        LEADERBOARD_CATEGORIES[
+            0
+        ]
+    ).catch(
+        error => {
+            list.textContent =
+                error?.message ||
+                String(error);
+        }
+    );
+
     return overlay;
 }
-
