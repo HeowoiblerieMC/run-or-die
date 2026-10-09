@@ -3,33 +3,10 @@ import {
 } from "@supabase/supabase-js";
 
 const supabaseUrl =
-    "YOUR_SUPABASE_PROJECT_URL";
+    "https://huccrznjxojesuogpvvu.supabase.co";
 
 const supabasePublishableKey =
-    "YOUR_SUPABASE_PUBLISHABLE_KEY";
-
-if (
-    !supabaseUrl.startsWith(
-        "https://"
-    ) ||
-    !supabaseUrl.endsWith(
-        ".supabase.co"
-    )
-) {
-    throw new Error(
-        "The Supabase Project URL is invalid."
-    );
-}
-
-if (
-    !supabasePublishableKey.startsWith(
-        "sb_publishable_"
-    )
-) {
-    throw new Error(
-        "The Supabase Publishable Key is invalid."
-    );
-}
+    "sb_publishable_2ARCKPN50s8meTVnL0haOA_PPGeNu0a";
 
 export const supabase =
     createClient(
