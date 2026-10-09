@@ -1,6 +1,27 @@
-RUN1. Replace the repository with this package.
-2. Run database.sql once in Supabase SQL Editor.
-3. In Supabase Authentication > Providers > Email, turn Confirm email OFF.
-4. Keep GitHub Actions secrets VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
-5. Commit everything together.
-6. If an account was partially created during earlier failed tests, delete that user once in Supabase Authentication > Users, then create it again.
+1. Replace every existing file with the matching complete code.
+
+2. Keep these GitHub Actions secrets:
+
+VITE_SUPABASE_URL
+VITE_SUPABASE_ANON_KEY
+
+3. Run database-v2.sql in the Supabase SQL Editor.
+
+4. In Supabase, open:
+
+Authentication
+Email provider
+Confirm email
+
+Set Confirm email to OFF.
+
+5. If a previous account creation failed, delete the incomplete user from:
+
+Authentication
+Users
+
+6. Commit all files together once.
+
+Suggested commit message:
+
+Restore complete RUN FOR LIVE project
