@@ -3,40 +3,38 @@ import {
 } from "@supabase/supabase-js";
 
 const supabaseUrl =
-    String(
-        import.meta.env
-            .VITE_SUPABASE_URL ||
-        ""
+    "YOUR_SUPABASE_PROJECT_URL";
+
+const supabasePublishableKey =
+    "YOUR_SUPABASE_PUBLISHABLE_KEY";
+
+if (
+    !supabaseUrl.startsWith(
+        "https://"
+    ) ||
+    !supabaseUrl.endsWith(
+        ".supabase.co"
     )
-        .trim()
-        .replace(
-            /\/+$/,
-            ""
-        );
-
-const supabaseKey =
-    String(
-        import.meta.env
-            .VITE_SUPABASE_ANON_KEY ||
-        ""
-    ).trim();
-
-if (!supabaseUrl) {
+) {
     throw new Error(
-        "VITE_SUPABASE_URL is missing."
+        "The Supabase Project URL is invalid."
     );
 }
 
-if (!supabaseKey) {
+if (
+    !supabasePublishableKey.startsWith(
+        "sb_publishable_"
+    )
+) {
     throw new Error(
-        "VITE_SUPABASE_ANON_KEY is missing."
+        "The Supabase Publishable Key is invalid."
     );
 }
 
 export const supabase =
     createClient(
         supabaseUrl,
-        supabaseKey,
+        supabasePublishableKey,
         {
             auth: {
                 persistSession:
