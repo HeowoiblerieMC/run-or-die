@@ -7,7 +7,8 @@ create table if not exists public.profiles (
 
     login_id text unique not null
         check (
-            login_id ~ '^[a-z0-9_]{4,20}$'
+            login_id ~
+            '^[a-z0-9_]{4,20}$'
         ),
 
     display_name text unique not null
@@ -16,7 +17,8 @@ create table if not exists public.profiles (
             between 3 and 16
         ),
 
-    role text not null default 'PLAYER'
+    role text not null
+        default 'PLAYER'
         check (
             role in (
                 'PLAYER',
@@ -32,8 +34,13 @@ create table if not exists public.profiles (
         default now()
 );
 
+alter table public.profiles
+    add column if not exists
+    selected_rank text not null
+    default 'PLAYER';
+
 create or replace function
-public.create_profile_for_new_user()
+public.handle_new_user()
 returns trigger
 language plpgsql
 security definer
@@ -47,14 +54,14 @@ begin
         lower(
             trim(
                 new.raw_user_meta_data
-                ->> 'login_id'
+                    ->> 'login_id'
             )
         );
 
     requested_display_name :=
         trim(
             new.raw_user_meta_data
-            ->> 'display_name'
+                ->> 'display_name'
         );
 
     if requested_login_id is null
@@ -82,7 +89,14 @@ begin
         requested_display_name,
         'PLAYER',
         'PLAYER'
-    );
+    )
+    on conflict (id)
+    do update set
+        login_id =
+            excluded.login_id,
+
+        display_name =
+            excluded.display_name;
 
     return new;
 end;
@@ -92,12 +106,13 @@ drop trigger if exists
 on_auth_user_created
 on auth.users;
 
-create trigger on_auth_user_created
+create trigger
+on_auth_user_created
 after insert
 on auth.users
 for each row
 execute function
-public.create_profile_for_new_user();
+public.handle_new_user();
 
 insert into public.profiles (
     id,
@@ -107,36 +122,49 @@ insert into public.profiles (
     selected_rank
 )
 select
-    users.id,
+    auth_users.id,
+
     lower(
         trim(
-            users.raw_user_meta_data
-            ->> 'login_id'
+            auth_users.raw_user_meta_data
+                ->> 'login_id'
         )
     ),
+
     trim(
-        users.raw_user_meta_data
-        ->> 'display_name'
+        auth_users.raw_user_meta_data
+            ->> 'display_name'
     ),
+
     'PLAYER',
     'PLAYER'
-from auth.users as users
-where
-    users.raw_user_meta_data
-        ->> 'login_id' is not null
 
-    and users.raw_user_meta_data
-        ->> 'display_name' is not null
+from auth.users as auth_users
+
+where
+    auth_users.raw_user_meta_data
+        ->> 'login_id'
+        is not null
+
+    and auth_users.raw_user_meta_data
+        ->> 'display_name'
+        is not null
 
     and not exists (
         select 1
         from public.profiles
-        where profiles.id = users.id
+        where profiles.id =
+            auth_users.id
     )
+
 on conflict do nothing;
 
 alter table public.profiles
 enable row level security;
+
+drop policy if exists
+"profiles readable by signed users"
+on public.profiles;
 
 drop policy if exists
 "Authenticated users can read profiles"
@@ -148,6 +176,10 @@ on public.profiles
 for select
 to authenticated
 using (true);
+
+drop policy if exists
+"own profile update"
+on public.profiles;
 
 drop policy if exists
 "Users can update their own profile"
