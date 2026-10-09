@@ -1,83 +1,84 @@
 import {
-    supabase,
-    testSupabaseConnection
+    supabase
 } from "../supabase.js";
 
-const PROFILE_COLUMNS = [
-    "id",
-    "login_id",
-    "display_name",
-    "role",
-    "selected_rank"
-].join(", ");
-
-function normalizeLoginId(value) {
-    return String(value || "")
+function normalizeLoginId(
+    value
+) {
+    return String(
+        value ||
+        ""
+    )
         .trim()
         .toLowerCase();
 }
 
-function authenticationEmail(loginId) {
-    return `${normalizeLoginId(loginId)}@runforlive.invalid`;
+function authenticationEmail(
+    loginId
+) {
+    return (
+        `${normalizeLoginId(loginId)}` +
+        "@runforlive.invalid"
+    );
 }
 
-function toProfile(row) {
+function convertProfile(
+    row
+) {
     return {
-        id: row.id,
-        loginId: row.login_id,
-        displayName: row.display_name,
-        role: row.role || "PLAYER",
-        selectedRank: row.selected_rank || "PLAYER",
-        guest: false
+        id:
+            row.id,
+
+        loginId:
+            row.login_id,
+
+        displayName:
+            row.display_name,
+
+        role:
+            row.role ||
+            "PLAYER",
+
+        selectedRank:
+            row.selected_rank ||
+            "PLAYER",
+
+        guest:
+            false
     };
 }
 
-function createReadableError(error) {
-    const message = String(
-        error?.message ||
-        error ||
-        "Unknown account error."
-    );
+function readableError(
+    error
+) {
+    const message =
+        String(
+            error?.message ||
+            error ||
+            "Account error."
+        );
 
     if (
-        message.includes("Load failed") ||
-        message.includes("Failed to fetch") ||
-        message.includes("NetworkError")
+        /Load failed|Failed to fetch|NetworkError/i
+            .test(message)
     ) {
         return new Error(
-            "Cannot reach the account server. Check the Supabase URL, publishable key, and internet connection."
+            "Cannot reach Supabase. Check the URL and publishable key."
         );
     }
 
     if (
-        message.includes("already registered") ||
-        message.includes("already been registered")
+        /already registered/i
+            .test(message)
     ) {
         return new Error(
-            "That Login ID is already registered. Use SIGN IN instead."
+            "That Login ID is already registered."
         );
     }
 
     if (
-        message.includes("duplicate key") &&
-        message.includes("login_id")
-    ) {
-        return new Error(
-            "That Login ID is already in use."
-        );
-    }
-
-    if (
-        message.includes("duplicate key") &&
-        message.includes("display_name")
-    ) {
-        return new Error(
-            "That display name is already in use."
-        );
-    }
-
-    if (
-        message.includes("Invalid login credentials")
+        /Invalid login credentials/i
+            .test(message)
     ) {
         return new Error(
             "Login ID or password is incorrect."
@@ -85,131 +86,113 @@ function createReadableError(error) {
     }
 
     if (
-        message.includes("Email not confirmed")
+        /Email not confirmed/i
+            .test(message)
     ) {
         return new Error(
-            "Confirm email is enabled in Supabase. Turn it off in Authentication settings."
+            "Turn Confirm email off in Supabase Authentication settings."
         );
     }
 
     if (
-        message.includes("Database error saving new user")
+        /Database error saving new user/i
+            .test(message)
     ) {
         return new Error(
-            "The Login ID or display name may already exist. If an earlier registration failed, delete the incomplete user in Supabase Authentication and try again."
+            "That Login ID or display name may already be registered."
         );
     }
 
-    return new Error(message);
-}
-
-function validateRegistration({
-    displayName,
-    loginId,
-    password,
-    confirmPassword
-}) {
-    const cleanDisplayName = String(
-        displayName || ""
-    ).trim();
-
-    const cleanLoginId =
-        normalizeLoginId(loginId);
-
-    const cleanPassword =
-        String(password || "");
-
-    if (
-        cleanDisplayName.length < 3 ||
-        cleanDisplayName.length > 16
-    ) {
-        throw new Error(
-            "Display name must be 3 to 16 characters."
-        );
-    }
-
-    if (
-        !/^[a-z0-9_]{4,20}$/.test(
-            cleanLoginId
-        )
-    ) {
-        throw new Error(
-            "Login ID must use 4 to 20 lowercase letters, numbers, or underscores."
-        );
-    }
-
-    if (cleanPassword.length < 8) {
-        throw new Error(
-            "Password must contain at least 8 characters."
-        );
-    }
-
-    if (
-        confirmPassword !== undefined &&
-        cleanPassword !== confirmPassword
-    ) {
-        throw new Error(
-            "Passwords do not match."
-        );
-    }
-
-    return {
-        displayName: cleanDisplayName,
-        loginId: cleanLoginId,
-        password: cleanPassword
-    };
+    return new Error(
+        message
+    );
 }
 
 export class AccountService {
+    async getSession() {
+        return this.getCurrentProfile();
+    }
+
     async getCurrentProfile() {
         try {
-            const { data, error } =
-                await supabase.auth.getSession();
+            const {
+                data,
+                error
+            } =
+                await supabase.auth
+                    .getSession();
 
             if (error) {
                 throw error;
             }
 
-            const user =
-                data.session?.user;
-
-            if (!user) {
+            if (
+                !data.session
+                    ?.user
+            ) {
                 return null;
             }
 
-            return await this.getProfile(
-                user.id
+            return this.getProfile(
+                data.session.user.id
             );
-        } catch (error) {
-            throw createReadableError(error);
+        } catch (
+            error
+        ) {
+            throw readableError(
+                error
+            );
         }
     }
 
-    async getSession() {
-        return this.getCurrentProfile();
-    }
-
-    async getProfile(userId) {
+    async getProfile(
+        userId
+    ) {
         try {
-            const { data, error } =
+            const {
+                data,
+                error
+            } =
                 await supabase
-                    .from("profiles")
-                    .select(PROFILE_COLUMNS)
-                    .eq("id", userId)
+                    .from(
+                        "profiles"
+                    )
+                    .select(
+                        [
+                            "id",
+                            "login_id",
+                            "display_name",
+                            "role",
+                            "selected_rank"
+                        ].join(",")
+                    )
+                    .eq(
+                        "id",
+                        userId
+                    )
                     .single();
 
             if (error) {
                 throw error;
             }
 
-            return toProfile(data);
-        } catch (error) {
-            throw createReadableError(error);
+            return convertProfile(
+                data
+            );
+        } catch (
+            error
+        ) {
+            throw readableError(
+                error
+            );
         }
     }
 
-    async waitForProfile(userId) {
-        let lastError = null;
+    async waitForProfile(
+        userId
+    ) {
+        let lastError =
+            null;
 
         for (
             let attempt = 0;
@@ -220,98 +203,188 @@ export class AccountService {
                 return await this.getProfile(
                     userId
                 );
-            } catch (error) {
-                lastError = error;
+            } catch (
+                error
+            ) {
+                lastError =
+                    error;
 
-                await new Promise(resolve => {
-                    setTimeout(resolve, 250);
-                });
+                await new Promise(
+                    resolve => {
+                        setTimeout(
+                            resolve,
+                            250
+                        );
+                    }
+                );
             }
         }
 
         throw (
             lastError ||
             new Error(
-                "The profile could not be created."
+                "Profile creation failed."
             )
         );
     }
 
-    async register(values) {
-        const account =
-            validateRegistration(values);
+    async register({
+        displayName,
+        loginId,
+        password,
+        confirmPassword
+    }) {
+        const cleanName =
+            String(
+                displayName ||
+                ""
+            ).trim();
+
+        const cleanLoginId =
+            normalizeLoginId(
+                loginId
+            );
+
+        const cleanPassword =
+            String(
+                password ||
+                ""
+            );
+
+        if (
+            cleanName.length < 3 ||
+            cleanName.length > 16
+        ) {
+            throw new Error(
+                "Display name must be 3 to 16 characters."
+            );
+        }
+
+        if (
+            !/^[a-z0-9_]{4,20}$/
+                .test(
+                    cleanLoginId
+                )
+        ) {
+            throw new Error(
+                "Login ID must use 4 to 20 lowercase letters, numbers, or underscores."
+            );
+        }
+
+        if (
+            cleanPassword.length <
+            8
+        ) {
+            throw new Error(
+                "Password must contain at least 8 characters."
+            );
+        }
+
+        if (
+            confirmPassword !==
+            undefined &&
+            cleanPassword !==
+            confirmPassword
+        ) {
+            throw new Error(
+                "Passwords do not match."
+            );
+        }
 
         try {
-            await testSupabaseConnection();
+            const {
+                data,
+                error
+            } =
+                await supabase.auth
+                    .signUp({
+                        email:
+                            authenticationEmail(
+                                cleanLoginId
+                            ),
 
-            const { data, error } =
-                await supabase.auth.signUp({
-                    email:
-                        authenticationEmail(
-                            account.loginId
-                        ),
+                        password:
+                            cleanPassword,
 
-                    password:
-                        account.password,
+                        options: {
+                            data: {
+                                login_id:
+                                    cleanLoginId,
 
-                    options: {
-                        data: {
-                            login_id:
-                                account.loginId,
-
-                            display_name:
-                                account.displayName
+                                display_name:
+                                    cleanName
+                            }
                         }
-                    }
-                });
+                    });
 
             if (error) {
                 throw error;
             }
 
-            if (!data.user) {
+            if (
+                !data.user
+            ) {
                 throw new Error(
                     "Account creation returned no user."
                 );
             }
 
-            if (!data.session) {
+            if (
+                !data.session
+            ) {
                 throw new Error(
-                    "The account was created but email confirmation is enabled. Turn Confirm email off in Supabase, delete this incomplete user, and create it again."
+                    "Turn Confirm email OFF in Supabase, delete the incomplete user, and try again."
                 );
             }
 
             return await this.waitForProfile(
                 data.user.id
             );
-        } catch (error) {
-            throw createReadableError(error);
+        } catch (
+            error
+        ) {
+            throw readableError(
+                error
+            );
         }
     }
 
-    async signIn(loginId, password) {
+    async signIn(
+        loginId,
+        password
+    ) {
         const cleanLoginId =
-            normalizeLoginId(loginId);
+            normalizeLoginId(
+                loginId
+            );
 
         const cleanPassword =
-            String(password || "");
+            String(
+                password ||
+                ""
+            );
 
-        if (!cleanLoginId) {
+        if (
+            !cleanLoginId
+        ) {
             throw new Error(
                 "Enter your Login ID."
             );
         }
 
-        if (!cleanPassword) {
+        if (
+            !cleanPassword
+        ) {
             throw new Error(
                 "Enter your password."
             );
         }
 
         try {
-            await testSupabaseConnection();
-
-            const { data, error } =
+            const {
+                data,
+                error
+            } =
                 await supabase.auth
                     .signInWithPassword({
                         email:
@@ -327,41 +400,51 @@ export class AccountService {
                 throw error;
             }
 
-            if (!data.user) {
-                throw new Error(
-                    "Sign-in returned no user."
-                );
-            }
-
-            return await this.getProfile(
+            return this.getProfile(
                 data.user.id
             );
-        } catch (error) {
-            throw createReadableError(error);
+        } catch (
+            error
+        ) {
+            throw readableError(
+                error
+            );
         }
     }
 
     createGuest() {
         return {
-            id: `guest_${crypto.randomUUID()}`,
-            loginId: null,
-            displayName: "Guest",
-            role: "GUEST",
-            selectedRank: "PLAYER",
-            guest: true
+            id:
+                `guest_${crypto.randomUUID()}`,
+
+            loginId:
+                null,
+
+            displayName:
+                "Guest",
+
+            role:
+                "GUEST",
+
+            selectedRank:
+                "PLAYER",
+
+            guest:
+                true
         };
     }
 
     async signOut() {
-        try {
-            const { error } =
-                await supabase.auth.signOut();
+        const {
+            error
+        } =
+            await supabase.auth
+                .signOut();
 
-            if (error) {
-                throw error;
-            }
-        } catch (error) {
-            throw createReadableError(error);
+        if (error) {
+            throw readableError(
+                error
+            );
         }
     }
 }
