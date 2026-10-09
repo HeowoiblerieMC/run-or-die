@@ -1,0 +1,27 @@
+RUN FOR LIVE REBUILD STARTER
+
+WHAT THIS BUILD DOES
+- Supabase sign-in, registration, and guest entry
+- Lightweight 3D main lobby
+- PLAY portal that opens Quick Play / Create / Join / Solo choices
+- Leaderboard portal for Wins, Captures, Escapes, and Rank Gifts
+- Main-lobby online presence
+- Structure ready for store, profile, moderation, match lobby, and game rebuild
+
+WHAT THIS BUILD DOES NOT YET DO
+- It does not start the old game.
+- It does not yet synchronize 3D player positions.
+- Quick Play, Create Room, Join Room, and Solo currently show placeholders.
+- NPC moderation and full NPC economy simulation are planned for later phases.
+
+SAFE INSTALL
+1. Create the branch rebuild-online.
+2. Upload this project to that branch. Do not overwrite main yet.
+3. Run database-v2.sql in Supabase SQL Editor.
+4. Confirm GitHub Actions has VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.
+5. Ensure Supabase Auth email confirmation is disabled for the login-ID adapter used here.
+6. Commit and wait for GitHub Actions.
+7. Test registration, login, guest entry, lobby walking, PLAY portal, and leaderboard.
+
+IMPORTANT
+The generated NPC leaderboard seed uses synthetic starter values only so the board is not empty during development. Remove or replace the seed before production if you do not want synthetic historical scores.
