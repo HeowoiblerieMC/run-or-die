@@ -27,7 +27,9 @@ jobs:
         run: |
           set -e
 
-          git checkout 0d29331 -- . \
+          RESTORE_COMMIT="41bd3c7"
+
+          git checkout "$RESTORE_COMMIT" -- . \
             ':(exclude).github/workflows/**'
 
           while IFS= read -r file
@@ -36,7 +38,7 @@ jobs:
               .github/workflows/*)
                 ;;
               *)
-                if ! git cat-file -e "0d29331:$file" 2>/dev/null
+                if ! git cat-file -e "$RESTORE_COMMIT:$file" 2>/dev/null
                 then
                   git rm -f -- "$file"
                 fi
@@ -48,9 +50,9 @@ jobs:
 
           if git diff --cached --quiet
           then
-            echo "Repository already matches the old game."
+            echo "Repository already matches commit $RESTORE_COMMIT."
             exit 0
           fi
 
-          git commit -m "Restore old game from 0d29331"
+          git commit -m "Restore old game from $RESTORE_COMMIT"
           git push origin HEAD:main
