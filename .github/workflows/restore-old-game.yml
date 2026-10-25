@@ -22,10 +22,35 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Restore repository from commit 0d29331
+      - name: Restore old game without workflow files
+        shell: bash
         run: |
-          git rm -r .
-          git checkout 0d29331 -- .
+          set -e
+
+          git checkout 0d29331 -- . \
+            ':(exclude).github/workflows/**'
+
+          while IFS= read -r file
+          do
+            case "$file" in
+              .github/workflows/*)
+                ;;
+              *)
+                if ! git cat-file -e "0d29331:$file" 2>/dev/null
+                then
+                  git rm -f -- "$file"
+                fi
+                ;;
+            esac
+          done < <(git ls-files)
+
           git add -A
+
+          if git diff --cached --quiet
+          then
+            echo "Repository already matches the old game."
+            exit 0
+          fi
+
           git commit -m "Restore old game from 0d29331"
           git push origin HEAD:main
